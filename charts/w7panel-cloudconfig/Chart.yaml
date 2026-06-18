@@ -1,0 +1,6 @@
+apiVersion: v2
+name: w7panel-cloudconfig
+description: W7Panel cloud config center plugin
+type: application
+version: 0.1.0
+appVersion: "0.1.0"

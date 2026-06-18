@@ -1,0 +1,31 @@
+replicaCount: 1
+
+image:
+  repository: w7panel-cloudconfig
+  tag: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+serviceAccount:
+  create: true
+  name: ""
+
+rbac:
+  create: true
+
+service:
+  port: 8001
+
+metrics:
+  port: 18080
+
+health:
+  port: 8081
+
+resources: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}

@@ -1,0 +1,19 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "w7panel-cloudconfig.fullname" . }}
+  labels:
+    {{- include "w7panel-cloudconfig.labels" . | nindent 4 }}
+spec:
+  selector:
+    {{- include "w7panel-cloudconfig.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.service.port }}
+      targetPort: http
+    - name: metrics
+      port: {{ .Values.metrics.port }}
+      targetPort: metrics
+    - name: health
+      port: {{ .Values.health.port }}
+      targetPort: health

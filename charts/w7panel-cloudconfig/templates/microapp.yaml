@@ -1,0 +1,29 @@
+apiVersion: w7panel.w7.com/v1alpha1
+kind: MicroApp
+metadata:
+  name: {{ include "w7panel-cloudconfig.fullname" . }}
+  labels:
+    {{- include "w7panel-cloudconfig.labels" . | nindent 4 }}
+    w7.cc/identifie: {{ include "w7panel-cloudconfig.fullname" . | quote }}
+spec:
+  title: 配置中心
+  frontendUrl: /panel-api/v1/namespaces/{{ .Release.Namespace }}/services/{{ include "w7panel-cloudconfig.fullname" . }}/proxy-no/
+  backendUrl: /panel-api/v1/namespaces/{{ .Release.Namespace }}/services/{{ include "w7panel-cloudconfig.fullname" . }}/proxy-no
+  config:
+    props:
+      backendUrl: /panel-api/v1/namespaces/{{ .Release.Namespace }}/services/{{ include "w7panel-cloudconfig.fullname" . }}/proxy-no
+  bindings:
+    - framework: vue3
+      is_default_register: 1
+      location: left
+      name: admin
+      status: 1
+      support: thirdparty_cd
+      title: admin
+      menu:
+        - displayorder: 0
+          do: "#/"
+          icon: platform
+          is_default: 1
+          location: normal
+          title: 配置中心
