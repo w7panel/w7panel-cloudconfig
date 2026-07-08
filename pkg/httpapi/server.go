@@ -180,7 +180,16 @@ func (s *Server) resolveConfig(c *gin.Context) {
 	if !ok {
 		return
 	}
-	items, err := configcenter.ResolveItems(cfg, s.lookupConfig(c.Request.Context()), c.Query("version"))
+	version, hasVersion := c.GetQuery("version")
+	var (
+		items []configcenter.ResolvedItem
+		err   error
+	)
+	if hasVersion {
+		items, err = configcenter.ResolveItems(cfg, s.lookupConfig(c.Request.Context()), version)
+	} else {
+		items, err = configcenter.ResolveAllItems(cfg, s.lookupConfig(c.Request.Context()))
+	}
 	if err != nil {
 		errorJSON(c, err)
 		return
@@ -190,7 +199,7 @@ func (s *Server) resolveConfig(c *gin.Context) {
 
 type applyRequest struct {
 	Version    string `json:"version"`
-	AutoDeploy *bool `json:"autoDeploy"`
+	AutoDeploy *bool  `json:"autoDeploy"`
 }
 
 func (s *Server) applyStrategy(c *gin.Context) {
@@ -227,11 +236,12 @@ func (s *Server) applyStrategy(c *gin.Context) {
 	}
 	now := metav1.Now()
 	cfg.Status.LastApplied = upsertApplyStatus(cfg.Status.LastApplied, cloudv1.ApplyStatus{
-		StrategyID: strategy.ID,
-		Version:    req.Version,
-		Revision:   result.Revision,
-		AppliedAt:  now,
-		Success:    true,
+		StrategyID:       strategy.ID,
+		StrategyRevision: configcenter.StrategyRevision(strategy),
+		Version:          req.Version,
+		Revision:         result.Revision,
+		AppliedAt:        now,
+		Success:          true,
 	})
 	_ = s.client().Update(c.Request.Context(), cfg)
 	_ = s.client().Status().Update(c.Request.Context(), cfg)

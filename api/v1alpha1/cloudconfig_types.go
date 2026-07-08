@@ -5,13 +5,13 @@ import (
 )
 
 const (
-	CloudConfigKind          = "CloudConfig"
-	CloudConfigResource      = "cloudconfigs"
-	CloudConfigLabelManaged  = "cloudconfig.w7.cc/managed"
-	CloudConfigLabelName     = "cloudconfig.w7.cc/name"
-	DeployConfigMapLabel     = "cloudconfig.w7.cc/deploy"
-	DeployConfigStrategyID   = "cloudconfig.w7.cc/strategy-id"
-	RestartAnnotation        = "cloudconfig.w7.cc/restarted-at"
+	CloudConfigKind           = "CloudConfig"
+	CloudConfigResource       = "cloudconfigs"
+	CloudConfigLabelManaged   = "cloudconfig.w7.cc/managed"
+	CloudConfigLabelName      = "cloudconfig.w7.cc/name"
+	DeployConfigMapLabel      = "cloudconfig.w7.cc/deploy"
+	DeployConfigStrategyID    = "cloudconfig.w7.cc/strategy-id"
+	RestartAnnotation         = "cloudconfig.w7.cc/restarted-at"
 	AppliedRevisionAnnotation = "cloudconfig.w7.cc/applied-revision"
 )
 
@@ -99,6 +99,8 @@ type CloudConfigStatus struct {
 type ApplyStatus struct {
 	// StrategyID 是对应 DeployStrategy 的 ID。
 	StrategyID string `json:"strategyId,omitempty"`
+	// StrategyRevision 是本次应用时部署策略的指纹，用于判断策略目标、类型或挂载路径是否变化。
+	StrategyRevision string `json:"strategyRevision,omitempty"`
 	// Version 是本次应用时选择的配置版本；为空表示公共配置。
 	Version string `json:"version,omitempty"`
 	// Revision 是本次应用的配置版本指纹。

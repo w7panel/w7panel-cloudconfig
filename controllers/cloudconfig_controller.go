@@ -25,6 +25,7 @@ func (r *CloudConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 	}
 
 	changedStatus := false
+	dataChanged := false
 	revision := configcenter.Revision(cfg)
 	now := metav1.Now()
 	if cfg.Status.CreatedAt.IsZero() {
@@ -39,6 +40,7 @@ func (r *CloudConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		cfg.Status.UpdatedAt = now
 		cfg.Status.RecentUpdated = true
 		changedStatus = true
+		dataChanged = true
 	}
 	if !cfg.Status.UpdatedAt.IsZero() && time.Since(cfg.Status.UpdatedAt.Time) >= 24*time.Hour && cfg.Status.RecentUpdated {
 		cfg.Status.RecentUpdated = false
@@ -51,8 +53,10 @@ func (r *CloudConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 		}
 	}
 
-	if err := r.touchDescendants(ctx, cfg, now); err != nil {
-		return ctrl.Result{}, err
+	if dataChanged {
+		if err := r.touchDescendants(ctx, cfg, now); err != nil {
+			return ctrl.Result{}, err
+		}
 	}
 	if cfg.Status.RecentUpdated {
 		if err := r.runAutoDeploy(ctx, cfg); err != nil {
@@ -63,21 +67,28 @@ func (r *CloudConfigReconciler) Reconcile(ctx context.Context, req ctrl.Request)
 }
 
 func (r *CloudConfigReconciler) touchDescendants(ctx context.Context, root *cloudv1.CloudConfig, now metav1.Time) error {
+	return r.touchDescendantsByName(ctx, root.Namespace, root.Name, now, map[string]bool{root.Name: true})
+}
+
+func (r *CloudConfigReconciler) touchDescendantsByName(ctx context.Context, namespace, parentName string, now metav1.Time, visited map[string]bool) error {
 	list := &cloudv1.CloudConfigList{}
-	if err := r.List(ctx, list, ctrlclient.InNamespace(root.Namespace)); err != nil {
+	if err := r.List(ctx, list, ctrlclient.InNamespace(namespace)); err != nil {
 		return err
 	}
 	for i := range list.Items {
 		item := &list.Items[i]
-		if item.Name == root.Name || item.Spec.Inherit == nil || item.Spec.Inherit.ConfigName != root.Name {
+		if item.Spec.Inherit == nil || item.Spec.Inherit.ConfigName != parentName || visited[item.Name] {
 			continue
 		}
-		if !item.Status.UpdatedAt.Before(&now) {
-			continue
+		visited[item.Name] = true
+		if item.Status.UpdatedAt.Before(&now) {
+			item.Status.UpdatedAt = now
+			item.Status.RecentUpdated = true
+			if err := r.Status().Update(ctx, item); err != nil {
+				return err
+			}
 		}
-		item.Status.UpdatedAt = now
-		item.Status.RecentUpdated = true
-		if err := r.Status().Update(ctx, item); err != nil {
+		if err := r.touchDescendantsByName(ctx, namespace, item.Name, now, visited); err != nil {
 			return err
 		}
 	}
@@ -87,16 +98,17 @@ func (r *CloudConfigReconciler) touchDescendants(ctx context.Context, root *clou
 func (r *CloudConfigReconciler) runAutoDeploy(ctx context.Context, cfg *cloudv1.CloudConfig) error {
 	changed := false
 	for _, strategy := range cfg.Spec.Strategies {
-		if !strategy.AutoDeploy || appliedRevision(cfg.Status.LastApplied, strategy.ID) == cfg.Status.Revision {
+		if !strategy.AutoDeploy || !configcenter.StrategyStale(cfg, strategy.ID) {
 			continue
 		}
 		result, err := configcenter.ApplyStrategy(ctx, r.Client, cfg, r.lookupConfig(ctx), strategy, strategy.LastSelectedVersion)
 		status := cloudv1.ApplyStatus{
-			StrategyID: strategy.ID,
-			Version:    strategy.LastSelectedVersion,
-			Revision:   cfg.Status.Revision,
-			AppliedAt:  metav1.Now(),
-			Success:    err == nil,
+			StrategyID:       strategy.ID,
+			StrategyRevision: configcenter.StrategyRevision(strategy),
+			Version:          strategy.LastSelectedVersion,
+			Revision:         cfg.Status.Revision,
+			AppliedAt:        metav1.Now(),
+			Success:          err == nil,
 		}
 		if err != nil {
 			status.Error = err.Error()
@@ -120,15 +132,6 @@ func (r *CloudConfigReconciler) lookupConfig(ctx context.Context) func(namespace
 		}
 		return cfg, true
 	}
-}
-
-func appliedRevision(list []cloudv1.ApplyStatus, strategyID string) string {
-	for _, item := range list {
-		if item.StrategyID == strategyID && item.Success {
-			return item.Revision
-		}
-	}
-	return ""
 }
 
 func upsertApplyStatus(list []cloudv1.ApplyStatus, item cloudv1.ApplyStatus) []cloudv1.ApplyStatus {

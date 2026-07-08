@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
+	"hash/fnv"
 	"regexp"
 	"sort"
 	"strings"
@@ -75,6 +76,10 @@ func Validate(config *cloudv1.CloudConfig) error {
 
 func ResolveItems(root *cloudv1.CloudConfig, lookup func(namespace, name string) (*cloudv1.CloudConfig, bool), version string) ([]ResolvedItem, error) {
 	return resolveItems(root, lookup, version, map[string]bool{})
+}
+
+func ResolveAllItems(root *cloudv1.CloudConfig, lookup func(namespace, name string) (*cloudv1.CloudConfig, bool)) ([]ResolvedItem, error) {
+	return resolveAllItems(root, lookup, map[string]bool{})
 }
 
 func resolveItems(root *cloudv1.CloudConfig, lookup func(namespace, name string) (*cloudv1.CloudConfig, bool), version string, stack map[string]bool) ([]ResolvedItem, error) {
@@ -148,6 +153,55 @@ func resolveItems(root *cloudv1.CloudConfig, lookup func(namespace, name string)
 	return result, nil
 }
 
+func resolveAllItems(root *cloudv1.CloudConfig, lookup func(namespace, name string) (*cloudv1.CloudConfig, bool), stack map[string]bool) ([]ResolvedItem, error) {
+	if root == nil {
+		return nil, nil
+	}
+	key := root.Namespace + "/" + root.Name
+	if stack[key] {
+		return nil, fmt.Errorf("circular inherit detected at %s", key)
+	}
+	stack[key] = true
+	defer delete(stack, key)
+
+	result := []ResolvedItem{}
+	if root.Spec.Inherit != nil && root.Spec.Inherit.ConfigName != "" {
+		ns := root.Spec.Inherit.Namespace
+		if ns == "" {
+			ns = root.Namespace
+		}
+		parent, ok := lookup(ns, root.Spec.Inherit.ConfigName)
+		if !ok {
+			return nil, fmt.Errorf("inherited config %s/%s not found", ns, root.Spec.Inherit.ConfigName)
+		}
+		items, err := resolveItems(parent, lookup, root.Spec.Inherit.Version, stack)
+		if err != nil {
+			return nil, err
+		}
+		for _, item := range items {
+			item.Source = "inherit"
+			item.SourceNamespace = parent.Namespace
+			item.SourceName = parent.Name
+			item.SourceTitle = parent.Spec.Name
+			result = append(result, item)
+		}
+	}
+
+	for _, item := range root.Spec.Items {
+		if item.Name == "" {
+			continue
+		}
+		result = append(result, ResolvedItem{
+			ConfigItem:      item,
+			Source:          "self",
+			SourceNamespace: root.Namespace,
+			SourceName:      root.Name,
+			SourceTitle:     root.Spec.Name,
+		})
+	}
+	return result, nil
+}
+
 func AvailableVersions(configs ...*cloudv1.CloudConfig) []string {
 	seen := map[string]bool{}
 	for _, cfg := range configs {
@@ -172,9 +226,66 @@ func AvailableVersions(configs ...*cloudv1.CloudConfig) []string {
 }
 
 func Revision(config *cloudv1.CloudConfig) string {
-	data, _ := json.Marshal(config.Spec)
+	data, _ := json.Marshal(struct {
+		Name    string                 `json:"name,omitempty"`
+		Items   []cloudv1.ConfigItem   `json:"items,omitempty"`
+		Inherit *cloudv1.ConfigInherit `json:"inherit,omitempty"`
+	}{
+		Name:    config.Spec.Name,
+		Items:   config.Spec.Items,
+		Inherit: config.Spec.Inherit,
+	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])[:16]
+}
+
+func StrategyRevision(strategy cloudv1.DeployStrategy) string {
+	data, _ := json.Marshal(map[string]any{
+		"lastSelectedVersion": strategy.LastSelectedVersion,
+		"mountPath":           strategy.MountPath,
+		"target": map[string]string{
+			"container": strategy.Target.Container,
+			"group":     strategy.Target.Group,
+			"kind":      strategy.Target.Kind,
+			"name":      strategy.Target.Name,
+			"namespace": strategy.Target.Namespace,
+		},
+		"type": strategy.Type,
+	})
+	hash := fnv.New32a()
+	_, _ = hash.Write(data)
+	return fmt.Sprintf("%x", hash.Sum32())
+}
+
+func StrategyAppliedStatus(config *cloudv1.CloudConfig, strategyID string) (cloudv1.ApplyStatus, bool) {
+	if config == nil {
+		return cloudv1.ApplyStatus{}, false
+	}
+	for _, item := range config.Status.LastApplied {
+		if item.StrategyID == strategyID && item.Success {
+			return item, true
+		}
+	}
+	return cloudv1.ApplyStatus{}, false
+}
+
+func StrategyStale(config *cloudv1.CloudConfig, strategyID string) bool {
+	status, ok := StrategyAppliedStatus(config, strategyID)
+	if !ok {
+		return true
+	}
+	for _, strategy := range config.Spec.Strategies {
+		if strategy.ID == strategyID && status.StrategyRevision != "" && status.StrategyRevision != StrategyRevision(strategy) {
+			return true
+		}
+	}
+	if config.Status.Revision != "" && status.Revision != "" && status.Revision != config.Status.Revision {
+		return true
+	}
+	if !config.Status.UpdatedAt.IsZero() && (status.AppliedAt.IsZero() || status.AppliedAt.Before(&config.Status.UpdatedAt)) {
+		return true
+	}
+	return false
 }
 
 func ItemsToData(items []ResolvedItem) map[string]string {

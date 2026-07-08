@@ -69,10 +69,10 @@
       <a-tabs v-model:active-key="activeTab">
         <a-tab-pane key="data" title="配置数据">
           <a-space wrap style="margin-bottom: 12px">
-            <a-tag class="link" :color="versionFilter === '' ? 'arcoblue' : 'gray'" @click="setVersion('')">全部</a-tag>
+            <a-tag class="link" :color="versionFilter === null ? 'arcoblue' : 'gray'" @click="setVersion(null)">全部</a-tag>
             <a-tag v-for="v in versionsOf([current])" :key="v" class="link" :color="versionFilter === v ? 'arcoblue' : 'gray'" @click="setVersion(v)">{{ v }}</a-tag>
           </a-space>
-          <a-table :data="resolvedItems" :pagination="false" row-key="name">
+          <a-table :data="resolvedItems" :pagination="false" row-key="_rowKey">
             <template #columns>
               <a-table-column title="version" :width="120">
                 <template #cell="{ record }">{{ record.version || '公共' }}</template>
@@ -199,7 +199,7 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { appliedRevision, formatDate, isRecent, parseQuick, uid, versionsOf } from './utils'
+import { formatDate, isRecent, isStrategyStale, parseQuick, uid, versionsOf } from './utils'
 import { applyStrategy, createConfig, deleteConfig, listConfigs, listTargets, resolveConfig, updateConfig } from './api'
 
 const namespace = ref(window?.$wujie?.props?.namespace || 'default')
@@ -207,7 +207,7 @@ const loading = ref(false)
 const configs = ref([])
 const current = ref(null)
 const activeTab = ref('data')
-const versionFilter = ref('')
+const versionFilter = ref(null)
 const resolvedItems = ref([])
 const formVisible = ref(false)
 const formVersions = ref([])
@@ -290,7 +290,7 @@ function openEdit(record) {
 async function openDetail(record) {
   current.value = record
   activeTab.value = 'data'
-  versionFilter.value = ''
+  versionFilter.value = null
   await loadResolved()
 }
 
@@ -302,7 +302,7 @@ async function setVersion(version) {
 async function loadResolved() {
   if (!current.value) return
   const result = await resolveConfig(current.value.metadata.namespace, current.value.metadata.name, versionFilter.value)
-  resolvedItems.value = result.items || []
+  resolvedItems.value = (result.items || []).map((item, index) => ({ ...item, _rowKey: resolvedRowKey(item, index) }))
 }
 
 function addItem() {
@@ -377,7 +377,11 @@ async function removeStrategy(index) {
 }
 
 function isStale(strategy) {
-  return appliedRevision(current.value, strategy.id) !== current.value.status?.revision
+  return isStrategyStale(current.value, strategy.id, strategy)
+}
+
+function resolvedRowKey(record, index) {
+  return `${record.source || 'self'}:${record.sourceNamespace || ''}:${record.sourceName || ''}:${record.version || ''}:${record.name}:${index}`
 }
 
 function openApply(strategy) {

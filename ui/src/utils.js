@@ -16,6 +16,13 @@ export function isRecent(status = {}) {
   return Date.now() - new Date(raw).getTime() < 24 * 60 * 60 * 1000
 }
 
+export function timeValue(value) {
+  const raw = value?.Time || value?.time || value
+  if (!raw) return 0
+  const date = new Date(raw)
+  return Number.isNaN(date.getTime()) ? 0 : date.getTime()
+}
+
 export function versionsOf(configs = []) {
   const set = new Set()
   configs.forEach((config) => {
@@ -44,4 +51,52 @@ export function parseQuick(text, version = '') {
 
 export function appliedRevision(config, strategyId) {
   return (config.status?.lastApplied || []).find((item) => item.strategyId === strategyId && item.success)?.revision || ''
+}
+
+function stableStringify(value) {
+  if (Array.isArray(value)) return `[${value.map(stableStringify).join(',')}]`
+  if (value && typeof value === 'object') {
+    return `{${Object.keys(value)
+      .sort()
+      .map((key) => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+      .join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+function hashString(value) {
+  let hash = 2166136261
+  for (let i = 0; i < value.length; i += 1) {
+    hash ^= value.charCodeAt(i)
+    hash = Math.imul(hash, 16777619)
+  }
+  return (hash >>> 0).toString(16)
+}
+
+export function strategyRevision(strategy = {}) {
+  const target = strategy.target || {}
+  return hashString(
+    stableStringify({
+      lastSelectedVersion: strategy.lastSelectedVersion || '',
+      mountPath: strategy.mountPath || '',
+      target: {
+        container: target.container || '',
+        group: target.group || '',
+        kind: target.kind || '',
+        name: target.name || '',
+        namespace: target.namespace || '',
+      },
+      type: strategy.type || '',
+    }),
+  )
+}
+
+export function isStrategyStale(config, strategyId, strategy = null) {
+  const applied = (config?.status?.lastApplied || []).find((item) => item.strategyId === strategyId && item.success)
+  if (!applied) return true
+  if (strategy && applied.strategyRevision && applied.strategyRevision !== strategyRevision(strategy)) return true
+  if (config?.status?.revision && applied.revision && applied.revision !== config.status.revision) return true
+  const updatedAt = timeValue(config?.status?.updatedAt)
+  const appliedAt = timeValue(applied.appliedAt)
+  return updatedAt > 0 && (!appliedAt || appliedAt < updatedAt)
 }

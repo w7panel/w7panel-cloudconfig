@@ -41,7 +41,8 @@ export function deleteConfig(namespace, name) {
 }
 
 export function resolveConfig(namespace, name, version = '') {
-  return request.get(`/cloudconfig-api/v1/configs/${namespace}/${name}/resolved`, { params: { version } }).then((r) => r.data)
+  const params = version === undefined || version === null ? {} : { version }
+  return request.get(`/cloudconfig-api/v1/configs/${namespace}/${name}/resolved`, { params }).then((r) => r.data)
 }
 
 export function listTargets(namespace) {

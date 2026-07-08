@@ -35,7 +35,7 @@ func TestApplyStrategyEnv(t *testing.T) {
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "demo"}},
-				Spec: corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
 			},
 		},
 	}
@@ -72,6 +72,72 @@ func TestApplyStrategyEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	if cm.Data["MYSQL_HOST"] != "mysql" {
+		t.Fatalf("expected configmap data, got %#v", cm.Data)
+	}
+}
+
+func TestApplyStrategyFile(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := cloudv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &cloudv1.CloudConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: "default"},
+		Spec: cloudv1.CloudConfigSpec{
+			Name:  "app",
+			Items: []cloudv1.ConfigItem{{Name: "config.yaml", Value: "debug: false"}},
+		},
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "demo"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
+			},
+		},
+	}
+	client := ctrlclientfake.NewClientBuilder().WithScheme(scheme).WithObjects(cfg, deployment).Build()
+	strategy := cloudv1.DeployStrategy{
+		ID:        "strategy-file",
+		Type:      StrategyTypeFile,
+		MountPath: "/app/config",
+		Target: cloudv1.TargetRef{
+			Namespace: "default",
+			Kind:      "Deployment",
+			Name:      "demo",
+			Container: "web",
+		},
+	}
+	result, err := ApplyStrategy(context.Background(), client, cfg, func(namespace, name string) (*cloudv1.CloudConfig, bool) {
+		return nil, false
+	}, strategy, "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if result.ItemCount != 1 {
+		t.Fatalf("expected 1 item, got %d", result.ItemCount)
+	}
+	updated := &appsv1.Deployment{}
+	if err := client.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: "demo"}, updated); err != nil {
+		t.Fatal(err)
+	}
+	if len(updated.Spec.Template.Spec.Volumes) != 1 || updated.Spec.Template.Spec.Volumes[0].ConfigMap == nil {
+		t.Fatalf("expected configmap volume, got %#v", updated.Spec.Template.Spec.Volumes)
+	}
+	mounts := updated.Spec.Template.Spec.Containers[0].VolumeMounts
+	if len(mounts) != 1 || mounts[0].MountPath != "/app/config" || !mounts[0].ReadOnly {
+		t.Fatalf("expected read-only mount at /app/config, got %#v", mounts)
+	}
+	cm := &corev1.ConfigMap{}
+	if err := client.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: updated.Spec.Template.Spec.Volumes[0].ConfigMap.Name}, cm); err != nil {
+		t.Fatal(err)
+	}
+	if cm.Data["config.yaml"] != "debug: false" {
 		t.Fatalf("expected configmap data, got %#v", cm.Data)
 	}
 }
