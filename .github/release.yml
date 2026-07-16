@@ -22,7 +22,7 @@ jobs:
       ZPK_IDC_ARTIFACT: ${{ vars.ZPK_IDC_ARTIFACT }}
       GO_VERSION: "1.25"
       NODE_VERSION: "20"
-      KO_DOCKER_REPO: ghcr.io/w7panel/w7panel-ckm
+      KO_DOCKER_REPO: ghcr.io/w7panel/w7panel-cloudconfig
       KO_DEFAULTBASEIMAGE: ccr.ccs.tencentyun.com/afan-public/ubuntu:24.04-offlineui
 
     steps:
