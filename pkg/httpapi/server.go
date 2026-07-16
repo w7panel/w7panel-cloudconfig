@@ -243,8 +243,14 @@ func (s *Server) applyStrategy(c *gin.Context) {
 		AppliedAt:        now,
 		Success:          true,
 	})
-	_ = s.client().Update(c.Request.Context(), cfg)
-	_ = s.client().Status().Update(c.Request.Context(), cfg)
+	if err := s.client().Update(c.Request.Context(), cfg); err != nil {
+		errorJSON(c, err)
+		return
+	}
+	if err := s.client().Status().Update(c.Request.Context(), cfg); err != nil {
+		errorJSON(c, err)
+		return
+	}
 	c.JSON(http.StatusOK, result)
 }
 

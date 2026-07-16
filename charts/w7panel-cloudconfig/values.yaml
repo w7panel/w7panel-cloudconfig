@@ -17,7 +17,7 @@ rbac:
   create: true
 
 service:
-  port: 8001
+  port: 8002
 
 metrics:
   port: 18080

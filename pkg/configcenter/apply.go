@@ -27,6 +27,11 @@ func ApplyStrategy(ctx context.Context, client ctrlclient.Client, config *cloudv
 	if err != nil {
 		return nil, err
 	}
+	if strategy.Type != StrategyTypeFile {
+		if err := validateEnvItems(items); err != nil {
+			return nil, err
+		}
+	}
 	data := ItemsToData(items)
 	revision := Revision(config)
 	cmName := StrategyConfigMapName(config, strategy.ID)
@@ -37,6 +42,31 @@ func ApplyStrategy(ctx context.Context, client ctrlclient.Client, config *cloudv
 		return nil, err
 	}
 	return &ApplyResult{ItemCount: len(items), ConfigMapName: cmName, Revision: revision}, nil
+}
+
+func validateEnvItems(items []ResolvedItem) error {
+	for _, item := range items {
+		if !isEnvName(item.Name) {
+			return fmt.Errorf("config item %q cannot be used as environment variable name", item.Name)
+		}
+	}
+	return nil
+}
+
+func isEnvName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, ch := range name {
+		if ch == '_' || ch >= 'A' && ch <= 'Z' || ch >= 'a' && ch <= 'z' {
+			continue
+		}
+		if i > 0 && ch >= '0' && ch <= '9' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 func upsertConfigMap(ctx context.Context, client ctrlclient.Client, namespace, name, strategyID string, data map[string]string) error {

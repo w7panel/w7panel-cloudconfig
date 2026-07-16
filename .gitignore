@@ -11,3 +11,5 @@
 
 /ui/node_modules/
 /ui/dist/
+__debug**
+/__debug**

@@ -35,7 +35,12 @@ func TestApplyStrategyEnv(t *testing.T) {
 			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
 			Template: corev1.PodTemplateSpec{
 				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "demo"}},
-				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
+				Spec: corev1.PodSpec{Containers: []corev1.Container{{
+					Name: "web",
+					EnvFrom: []corev1.EnvFromSource{{
+						ConfigMapRef: &corev1.ConfigMapEnvSource{LocalObjectReference: corev1.LocalObjectReference{Name: "app-env"}},
+					}},
+				}}},
 			},
 		},
 	}
@@ -64,8 +69,11 @@ func TestApplyStrategyEnv(t *testing.T) {
 		t.Fatal(err)
 	}
 	envFrom := updated.Spec.Template.Spec.Containers[0].EnvFrom
-	if len(envFrom) != 1 || envFrom[0].ConfigMapRef == nil || envFrom[0].ConfigMapRef.Name == "" {
+	if len(envFrom) != 2 || envFrom[0].ConfigMapRef == nil || envFrom[0].ConfigMapRef.Name == "" {
 		t.Fatalf("expected envFrom configMapRef, got %#v", envFrom)
+	}
+	if envFrom[1].ConfigMapRef == nil || envFrom[1].ConfigMapRef.Name != "app-env" {
+		t.Fatalf("expected existing app envFrom to keep precedence, got %#v", envFrom)
 	}
 	cm := &corev1.ConfigMap{}
 	if err := client.Get(context.Background(), types.NamespacedName{Namespace: "default", Name: envFrom[0].ConfigMapRef.Name}, cm); err != nil {
@@ -139,5 +147,48 @@ func TestApplyStrategyFile(t *testing.T) {
 	}
 	if cm.Data["config.yaml"] != "debug: false" {
 		t.Fatalf("expected configmap data, got %#v", cm.Data)
+	}
+}
+
+func TestApplyStrategyEnvRejectsInvalidEnvName(t *testing.T) {
+	scheme := runtime.NewScheme()
+	if err := clientgoscheme.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	if err := cloudv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	cfg := &cloudv1.CloudConfig{
+		ObjectMeta: metav1.ObjectMeta{Name: "app-config", Namespace: "default"},
+		Spec: cloudv1.CloudConfigSpec{
+			Name:  "app",
+			Items: []cloudv1.ConfigItem{{Name: "mysql.host", Value: "mysql"}},
+		},
+	}
+	deployment := &appsv1.Deployment{
+		ObjectMeta: metav1.ObjectMeta{Name: "demo", Namespace: "default"},
+		Spec: appsv1.DeploymentSpec{
+			Selector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "demo"}},
+			Template: corev1.PodTemplateSpec{
+				ObjectMeta: metav1.ObjectMeta{Labels: map[string]string{"app": "demo"}},
+				Spec:       corev1.PodSpec{Containers: []corev1.Container{{Name: "web"}}},
+			},
+		},
+	}
+	client := ctrlclientfake.NewClientBuilder().WithScheme(scheme).WithObjects(cfg, deployment).Build()
+	_, err := ApplyStrategy(context.Background(), client, cfg, func(namespace, name string) (*cloudv1.CloudConfig, bool) {
+		return nil, false
+	}, cloudv1.DeployStrategy{
+		ID:   "strategy-env",
+		Type: StrategyTypeEnv,
+		Target: cloudv1.TargetRef{
+			Namespace: "default",
+			Kind:      "Deployment",
+			Name:      "demo",
+			Container: "web",
+		},
+	}, "")
+	if err == nil {
+		t.Fatal("expected invalid env name error")
 	}
 }

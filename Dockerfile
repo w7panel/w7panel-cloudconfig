@@ -16,5 +16,5 @@ FROM alpine:3.22
 WORKDIR /
 COPY --from=backend /out/w7panel-cloudconfig /w7panel-cloudconfig
 COPY --from=frontend /src/ui/dist /kodata
-EXPOSE 8001 8081 18080
+EXPOSE 8002 8081 18080
 ENTRYPOINT ["/w7panel-cloudconfig"]

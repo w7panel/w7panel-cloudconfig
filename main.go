@@ -37,7 +37,7 @@ func main() {
 	var leaderElection bool
 	flag.StringVar(&metricsAddr, "metrics-bind-address", envString("METRICS_BIND_ADDRESS", ":18080"), "metrics bind address")
 	flag.StringVar(&probeAddr, "health-probe-bind-address", envString("HEALTH_PROBE_BIND_ADDRESS", ":8081"), "health probe bind address")
-	flag.StringVar(&httpAddr, "http-bind-address", envString("HTTP_BIND_ADDRESS", ":8001"), "HTTP API bind address")
+	flag.StringVar(&httpAddr, "http-bind-address", envString("HTTP_BIND_ADDRESS", ":8002"), "HTTP API bind address")
 	flag.BoolVar(&leaderElection, "leader-elect", false, "enable leader election")
 	opts := zap.Options{Development: true}
 	opts.BindFlags(flag.CommandLine)

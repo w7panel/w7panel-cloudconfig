@@ -15,7 +15,7 @@ export default defineConfig({
     host: '0.0.0.0',
     proxy: {
       '/cloudconfig-api': {
-        target: 'http://127.0.0.1:8001',
+        target: process.env.VITE_API_TARGET || 'http://127.0.0.1:8002',
         changeOrigin: true,
       },
     },
