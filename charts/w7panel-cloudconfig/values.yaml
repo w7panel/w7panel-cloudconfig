@@ -1,7 +1,7 @@
 replicaCount: 1
 
 image:
-  repository: w7panel-cloudconfig
+  repository: ghcr.registry.cdn.w7.cc/w7panel/w7panel-cloudconfig
   tag: ""
   pullPolicy: IfNotPresent
 
