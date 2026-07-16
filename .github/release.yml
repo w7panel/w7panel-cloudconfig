@@ -11,7 +11,7 @@ permissions:
   packages: write
 
 jobs:
-  push-zpk:
+  release:
     name: Push zpk
     runs-on: ubuntu-latest
 
