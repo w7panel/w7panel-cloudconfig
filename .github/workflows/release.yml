@@ -36,8 +36,8 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p dist
-          # helm package ./charts/w7panel-cloudconfig --app-version="${GITHUB_REF_NAME}" --version "${GITHUB_REF_NAME}" --destination dist
-          helm package ./charts/w7panel-cloudconfig --destination dist
+          helm package ./charts/w7panel-cloudconfig --app-version="${GITHUB_REF_NAME}" --version "${GITHUB_REF_NAME}" --destination dist
+          # helm package ./charts/w7panel-cloudconfig --destination dist
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
