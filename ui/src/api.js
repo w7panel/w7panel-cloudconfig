@@ -1,5 +1,6 @@
 import axios from 'axios'
 import { Message } from '@arco-design/web-vue'
+import { clearToken, fetchToken, getToken } from './auth'
 
 const request = axios.create({
   baseURL: window?.$wujie?.props?.backendUrl || '',
@@ -7,18 +8,31 @@ const request = axios.create({
 })
 
 request.interceptors.request.use((config) => {
-  const token = window?.$wujie?.props?.paneltoken || localStorage.getItem('panelToken') || localStorage.getItem('token')
+  const token = getToken()
   config.headers = config.headers || {}
   if (token) {
-    config.headers['X-W7Panel-Token'] = token
-    config.headers.Authorization = `Bearer ${token}`
+    config.headers['Authorization-config'] = `Bearer ${token}`
   }
   return config
 })
 
 request.interceptors.response.use(
   (response) => response,
-  (error) => {
+  async (error) => {
+    if (error.response?.status === 401 && !error.config?._authRetried) {
+      clearToken()
+      try {
+        const token = await fetchToken()
+        if (token) {
+          error.config._authRetried = true
+          error.config.headers = error.config.headers || {}
+          error.config.headers['Authorization-config'] = `Bearer ${token}`
+          return request(error.config)
+        }
+      } catch {
+        // Preserve the original API error below.
+      }
+    }
     Message.error(error.response?.data?.message || error.message || '请求失败')
     return Promise.reject(error)
   },

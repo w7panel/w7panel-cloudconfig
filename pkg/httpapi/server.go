@@ -10,6 +10,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -23,11 +24,17 @@ import (
 )
 
 type Server struct {
-	Addr         string
-	Client       ctrlclient.Client
-	APIReader    ctrlclient.Reader
-	FrontendRoot string
-	server       *http.Server
+	Addr             string
+	Client           ctrlclient.Client
+	APIReader        ctrlclient.Reader
+	FrontendRoot     string
+	OIDCDiscoveryURL string
+	OIDCRedirectURL  string
+	OIDCClientID     string
+	HTTPClient       *http.Client
+	server           *http.Server
+	oidcMu           sync.Mutex
+	oidcState        *oidcProviderState
 }
 
 func (s *Server) Start(ctx context.Context) error {
@@ -54,6 +61,8 @@ func (s *Server) NeedLeaderElection() bool {
 func (s *Server) router() http.Handler {
 	router := gin.New()
 	router.Use(gin.Logger(), gin.Recovery())
+	router.GET("/cloudconfig-api/v1/login/config", s.loginConfig)
+	router.POST("/cloudconfig-api/v1/login", s.login)
 	api := router.Group("/cloudconfig-api/v1")
 	api.Use(s.authMiddleware())
 	api.GET("/configs", s.listConfigs)
@@ -70,11 +79,24 @@ func (s *Server) router() http.Handler {
 
 func (s *Server) authMiddleware() gin.HandlerFunc {
 	return func(c *gin.Context) {
-		if c.GetHeader("Authorization") == "" && c.GetHeader("Authorization-ckm") == "" && c.GetHeader("X-W7Panel-Token") == "" {
-			c.JSON(http.StatusUnauthorized, gin.H{"message": "missing authorization token"})
+		token, err := configAuthorizationToken(c.GetHeader("Authorization-config"))
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"message": err.Error()})
 			c.Abort()
 			return
 		}
+		claims, err := s.verifyIDToken(c.Request.Context(), token)
+		if err != nil {
+			c.JSON(http.StatusUnauthorized, gin.H{"message": "invalid authorization token"})
+			c.Abort()
+			return
+		}
+		if !claims.canManageConfig() {
+			c.JSON(http.StatusForbidden, gin.H{"message": "insufficient permissions"})
+			c.Abort()
+			return
+		}
+		c.Set("oidcClaims", claims)
 		c.Next()
 	}
 }
