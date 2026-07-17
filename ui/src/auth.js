@@ -1,11 +1,12 @@
 import axios from 'axios'
+import { getAPIBaseURL } from './request-base'
 
 const TOKEN_KEY = 'cloudconfig-token'
 const OAUTH_STATE_KEY = 'cloudconfig-oauth-state'
 const OAUTH_REDIRECT_KEY = 'cloudconfig-oauth-redirect'
 
 const authRequest = axios.create({
-  baseURL: window?.$wujie?.props?.backendUrl || '',
+  baseURL: getAPIBaseURL(),
   timeout: 15000,
 })
 

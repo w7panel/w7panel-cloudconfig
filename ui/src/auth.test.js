@@ -1,10 +1,13 @@
 import { webcrypto } from 'node:crypto'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-const axiosMock = vi.hoisted(() => ({ get: vi.fn(), post: vi.fn() }))
+const axiosMock = vi.hoisted(() => ({
+  client: { get: vi.fn(), post: vi.fn() },
+  create: vi.fn(),
+}))
 
 vi.mock('axios', () => ({
-  default: { create: () => axiosMock },
+  default: { create: axiosMock.create },
 }))
 
 class MemoryStorage {
@@ -30,7 +33,7 @@ function setupWindow({ microapp = true, path = '/', search = '', emit } = {}) {
   globalThis.window = {
     __POWERED_BY_WUJIE__: microapp,
     $wujie: {
-      props: { backendUrl: '/backend' },
+      props: { url: 'https://panel.example/backend', backendUrl: '/wrong-backend' },
       bus: { $emit: emit || vi.fn() },
     },
     crypto: webcrypto,
@@ -44,8 +47,10 @@ function setupWindow({ microapp = true, path = '/', search = '', emit } = {}) {
 describe('cloudconfig auth', () => {
   beforeEach(() => {
     vi.resetModules()
-    axiosMock.get.mockReset()
-    axiosMock.post.mockReset()
+    axiosMock.client.get.mockReset()
+    axiosMock.client.post.mockReset()
+    axiosMock.create.mockReset()
+    axiosMock.create.mockReturnValue(axiosMock.client)
   })
 
   it('exchanges one Wujie OIDC code for concurrent callers', async () => {
@@ -58,12 +63,12 @@ describe('cloudconfig auth', () => {
       setTimeout(() => callback('oidc-code'), 0)
     })
     setupWindow({ emit })
-    axiosMock.get.mockResolvedValue({ data: {
+    axiosMock.client.get.mockResolvedValue({ data: {
       client_id: 'default',
       redirect_uri: 'https://panel.example/callback',
       scope: 'openid profile',
     } })
-    axiosMock.post.mockResolvedValue({ data: { access_token: 'signed-id-token' } })
+    axiosMock.client.post.mockResolvedValue({ data: { access_token: 'signed-id-token' } })
     const auth = await import('./auth.js')
 
     const [first, second] = await Promise.all([auth.fetchToken(), auth.fetchToken()])
@@ -72,7 +77,8 @@ describe('cloudconfig auth', () => {
     expect(second).toBe('signed-id-token')
     expect(emit).toHaveBeenCalledTimes(1)
     expect(emit.mock.calls[0][0]).toBe('getOidcCode')
-    expect(axiosMock.post).toHaveBeenCalledWith('/cloudconfig-api/v1/login', { code: 'oidc-code' })
+    expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: 'https://panel.example/backend', timeout: 15000 })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/cloudconfig-api/v1/login', { code: 'oidc-code' })
     expect(auth.getToken()).toBe('signed-id-token')
   })
 
@@ -80,11 +86,12 @@ describe('cloudconfig auth', () => {
     setupWindow({ microapp: false, path: '/callback', search: '?code=code-1&state=expected' })
     localStorage.setItem('cloudconfig-oauth-state', 'expected')
     localStorage.setItem('cloudconfig-oauth-redirect', '/configs?namespace=default')
-    axiosMock.post.mockResolvedValue({ data: { access_token: 'callback-token' } })
+    axiosMock.client.post.mockResolvedValue({ data: { access_token: 'callback-token' } })
     const auth = await import('./auth.js')
 
     await expect(auth.bootstrapAuth()).resolves.toBe('callback-token')
     expect(window.history.replaceState).toHaveBeenCalledWith({}, '', '/configs?namespace=default')
+    expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: '', timeout: 15000 })
     expect(auth.getToken()).toBe('callback-token')
   })
 
@@ -94,6 +101,6 @@ describe('cloudconfig auth', () => {
     const auth = await import('./auth.js')
 
     await expect(auth.bootstrapAuth()).rejects.toThrow('invalid oauth state')
-    expect(axiosMock.post).not.toHaveBeenCalled()
+    expect(axiosMock.client.post).not.toHaveBeenCalled()
   })
 })

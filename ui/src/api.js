@@ -1,9 +1,10 @@
 import axios from 'axios'
 import { Message } from '@arco-design/web-vue'
 import { clearToken, fetchToken, getToken } from './auth'
+import { getAPIBaseURL } from './request-base'
 
 const request = axios.create({
-  baseURL: window?.$wujie?.props?.backendUrl || '',
+  baseURL: getAPIBaseURL(),
   timeout: 15000,
 })
 
