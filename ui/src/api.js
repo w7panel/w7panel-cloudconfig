@@ -43,31 +43,31 @@ request.interceptors.response.use(
   },
 )
 
-export function listConfigs(namespace) {
-  return request.get('/cloudconfig-api/v1/configs', { params: { namespace } }).then((r) => r.data || [])
+export function listConfigs() {
+  return request.get('/cloudconfig-api/v1/configs').then((r) => r.data || [])
 }
 
-export function createConfig(data, namespace) {
-  return request.post('/cloudconfig-api/v1/configs', data, { params: { namespace } }).then((r) => r.data)
+export function createConfig(data) {
+  return request.post('/cloudconfig-api/v1/configs', data).then((r) => r.data)
 }
 
-export function updateConfig(namespace, name, data) {
-  return request.put(`/cloudconfig-api/v1/configs/${namespace}/${name}`, data).then((r) => r.data)
+export function updateConfig(name, data) {
+  return request.put(`/cloudconfig-api/v1/configs/${name}`, data).then((r) => r.data)
 }
 
-export function deleteConfig(namespace, name) {
-  return request.delete(`/cloudconfig-api/v1/configs/${namespace}/${name}`).then((r) => r.data)
+export function deleteConfig(name) {
+  return request.delete(`/cloudconfig-api/v1/configs/${name}`).then((r) => r.data)
 }
 
-export function resolveConfig(namespace, name, version = '') {
+export function resolveConfig(name, version = '') {
   const params = version === undefined || version === null ? {} : { version }
-  return request.get(`/cloudconfig-api/v1/configs/${namespace}/${name}/resolved`, { params }).then((r) => r.data)
+  return request.get(`/cloudconfig-api/v1/configs/${name}/resolved`, { params }).then((r) => r.data)
 }
 
 export function listTargets(namespace) {
   return request.get('/cloudconfig-api/v1/targets', { params: { namespace } }).then((r) => r.data || [])
 }
 
-export function applyStrategy(namespace, name, strategyId, data) {
-  return request.post(`/cloudconfig-api/v1/configs/${namespace}/${name}/strategies/${strategyId}/apply`, data).then((r) => r.data)
+export function applyStrategy(name, strategyId, data) {
+  return request.post(`/cloudconfig-api/v1/configs/${name}/strategies/${strategyId}/apply`, data).then((r) => r.data)
 }

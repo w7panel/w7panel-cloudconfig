@@ -9,7 +9,7 @@ spec:
     listKind: CloudConfigList
     plural: cloudconfigs
     singular: cloudconfig
-  scope: Namespaced
+  scope: Cluster
   versions:
     - name: v1alpha1
       served: true
@@ -34,8 +34,6 @@ spec:
                 inherit:
                   type: object
                   properties:
-                    namespace:
-                      type: string
                     configName:
                       type: string
                     version:
@@ -72,6 +70,7 @@ spec:
                         type: string
                       target:
                         type: object
+                        required: ["namespace", "kind", "name", "container"]
                         properties:
                           namespace:
                             type: string

@@ -32,6 +32,17 @@ export function versionsOf(configs = []) {
   return Array.from(set).sort()
 }
 
+export function normalizeInherit(inherit = {}) {
+  return {
+    configName: inherit.configName || '',
+    version: inherit.version || '',
+  }
+}
+
+export function inheritOptionValue(inherit = {}) {
+  return JSON.stringify(normalizeInherit(inherit))
+}
+
 export function parseQuick(text, version = '') {
   return String(text || '')
     .split('\n')

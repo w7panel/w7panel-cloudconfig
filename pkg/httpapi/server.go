@@ -67,11 +67,11 @@ func (s *Server) router() http.Handler {
 	api.Use(s.authMiddleware())
 	api.GET("/configs", s.listConfigs)
 	api.POST("/configs", s.createConfig)
-	api.GET("/configs/:namespace/:name", s.getConfig)
-	api.PUT("/configs/:namespace/:name", s.updateConfig)
-	api.DELETE("/configs/:namespace/:name", s.deleteConfig)
-	api.GET("/configs/:namespace/:name/resolved", s.resolveConfig)
-	api.POST("/configs/:namespace/:name/strategies/:strategy/apply", s.applyStrategy)
+	api.GET("/configs/:name", s.getConfig)
+	api.PUT("/configs/:name", s.updateConfig)
+	api.DELETE("/configs/:name", s.deleteConfig)
+	api.GET("/configs/:name/resolved", s.resolveConfig)
+	api.POST("/configs/:name/strategies/:strategy/apply", s.applyStrategy)
 	api.GET("/targets", s.listTargets)
 	router.NoRoute(s.serveFrontend())
 	return router
@@ -117,7 +117,7 @@ func namespaceFromQuery(c *gin.Context) string {
 
 func (s *Server) listConfigs(c *gin.Context) {
 	list := &cloudv1.CloudConfigList{}
-	if err := s.client().List(c.Request.Context(), list, ctrlclient.InNamespace(namespaceFromQuery(c))); err != nil {
+	if err := s.client().List(c.Request.Context(), list); err != nil {
 		errorJSON(c, err)
 		return
 	}
@@ -130,15 +130,17 @@ func (s *Server) createConfig(c *gin.Context) {
 		errorJSON(c, err)
 		return
 	}
-	if cfg.Namespace == "" {
-		cfg.Namespace = namespaceFromQuery(c)
-	}
+	cfg.Namespace = ""
 	if cfg.Name == "" {
 		cfg.Name = generatedName(cfg.Spec.Name)
 	}
 	cfg.TypeMeta = metav1.TypeMeta{APIVersion: cloudv1.GroupVersion.String(), Kind: cloudv1.CloudConfigKind}
 	configcenter.NormalizeConfig(cfg)
 	if err := configcenter.Validate(cfg); err != nil {
+		errorJSON(c, err)
+		return
+	}
+	if err := configcenter.ValidateInheritance(cfg, s.lookupConfig(c.Request.Context())); err != nil {
 		errorJSON(c, err)
 		return
 	}
@@ -155,7 +157,7 @@ func (s *Server) createConfig(c *gin.Context) {
 }
 
 func (s *Server) getConfig(c *gin.Context) {
-	cfg, ok := s.loadConfig(c, c.Param("namespace"), c.Param("name"))
+	cfg, ok := s.loadConfig(c, c.Param("name"))
 	if !ok {
 		return
 	}
@@ -163,7 +165,7 @@ func (s *Server) getConfig(c *gin.Context) {
 }
 
 func (s *Server) updateConfig(c *gin.Context) {
-	current, ok := s.loadConfig(c, c.Param("namespace"), c.Param("name"))
+	current, ok := s.loadConfig(c, c.Param("name"))
 	if !ok {
 		return
 	}
@@ -178,6 +180,10 @@ func (s *Server) updateConfig(c *gin.Context) {
 		errorJSON(c, err)
 		return
 	}
+	if err := configcenter.ValidateInheritance(current, s.lookupConfig(c.Request.Context())); err != nil {
+		errorJSON(c, err)
+		return
+	}
 	if err := s.client().Update(c.Request.Context(), current); err != nil {
 		errorJSON(c, err)
 		return
@@ -186,7 +192,7 @@ func (s *Server) updateConfig(c *gin.Context) {
 }
 
 func (s *Server) deleteConfig(c *gin.Context) {
-	cfg, ok := s.loadConfig(c, c.Param("namespace"), c.Param("name"))
+	cfg, ok := s.loadConfig(c, c.Param("name"))
 	if !ok {
 		return
 	}
@@ -198,7 +204,7 @@ func (s *Server) deleteConfig(c *gin.Context) {
 }
 
 func (s *Server) resolveConfig(c *gin.Context) {
-	cfg, ok := s.loadConfig(c, c.Param("namespace"), c.Param("name"))
+	cfg, ok := s.loadConfig(c, c.Param("name"))
 	if !ok {
 		return
 	}
@@ -225,7 +231,7 @@ type applyRequest struct {
 }
 
 func (s *Server) applyStrategy(c *gin.Context) {
-	cfg, ok := s.loadConfig(c, c.Param("namespace"), c.Param("name"))
+	cfg, ok := s.loadConfig(c, c.Param("name"))
 	if !ok {
 		return
 	}
@@ -252,24 +258,38 @@ func (s *Server) applyStrategy(c *gin.Context) {
 		strategy.LastSelectedVersion = req.Version
 	}
 	result, err := configcenter.ApplyStrategy(c.Request.Context(), s.client(), cfg, s.lookupConfig(c.Request.Context()), strategy, req.Version)
-	if err != nil {
-		errorJSON(c, err)
-		return
-	}
 	now := metav1.Now()
-	cfg.Status.LastApplied = upsertApplyStatus(cfg.Status.LastApplied, cloudv1.ApplyStatus{
+	status := cloudv1.ApplyStatus{
 		StrategyID:       strategy.ID,
 		StrategyRevision: configcenter.StrategyRevision(strategy),
 		Version:          req.Version,
-		Revision:         result.Revision,
+		Revision:         configcenter.Revision(cfg),
 		AppliedAt:        now,
-		Success:          true,
-	})
+		Success:          err == nil,
+	}
+	if err != nil {
+		status.Error = err.Error()
+		status.FailureCount = 1
+		if previous, ok := configcenter.StrategyLastStatus(cfg, strategy.ID); ok && !previous.Success && previous.Revision == status.Revision && previous.StrategyRevision == status.StrategyRevision && !cfg.Status.UpdatedAt.After(previous.AppliedAt.Time) {
+			status.FailureCount = previous.FailureCount + 1
+		}
+		if strategy.AutoDeploy {
+			status.NextRetryAt = metav1.NewTime(now.Add(configcenter.AutoDeployRetryDelay(status.FailureCount)))
+		}
+	} else if result != nil {
+		status.Revision = result.Revision
+	}
+	lastApplied := upsertApplyStatus(cfg.Status.LastApplied, status)
 	if err := s.client().Update(c.Request.Context(), cfg); err != nil {
 		errorJSON(c, err)
 		return
 	}
+	cfg.Status.LastApplied = lastApplied
 	if err := s.client().Status().Update(c.Request.Context(), cfg); err != nil {
+		errorJSON(c, err)
+		return
+	}
+	if err != nil {
 		errorJSON(c, err)
 		return
 	}
@@ -324,19 +344,19 @@ func targetFromTemplate(namespace, kind, name, group string, containers []corev1
 	return gin.H{"namespace": namespace, "kind": kind, "name": name, "group": group, "containers": names}
 }
 
-func (s *Server) loadConfig(c *gin.Context, namespace, name string) (*cloudv1.CloudConfig, bool) {
+func (s *Server) loadConfig(c *gin.Context, name string) (*cloudv1.CloudConfig, bool) {
 	cfg := &cloudv1.CloudConfig{}
-	if err := s.client().Get(c.Request.Context(), types.NamespacedName{Namespace: namespace, Name: name}, cfg); err != nil {
+	if err := s.client().Get(c.Request.Context(), types.NamespacedName{Name: name}, cfg); err != nil {
 		errorJSON(c, err)
 		return nil, false
 	}
 	return cfg, true
 }
 
-func (s *Server) lookupConfig(ctx context.Context) func(namespace, name string) (*cloudv1.CloudConfig, bool) {
-	return func(namespace, name string) (*cloudv1.CloudConfig, bool) {
+func (s *Server) lookupConfig(ctx context.Context) func(name string) (*cloudv1.CloudConfig, bool) {
+	return func(name string) (*cloudv1.CloudConfig, bool) {
 		cfg := &cloudv1.CloudConfig{}
-		if err := s.client().Get(ctx, types.NamespacedName{Namespace: namespace, Name: name}, cfg); err != nil {
+		if err := s.client().Get(ctx, types.NamespacedName{Name: name}, cfg); err != nil {
 			return nil, false
 		}
 		return cfg, true

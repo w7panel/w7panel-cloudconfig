@@ -41,8 +41,6 @@ type ConfigItem struct {
 
 // ConfigInherit 描述当前配置继承的上游配置及其版本。
 type ConfigInherit struct {
-	// Namespace 是被继承配置所在命名空间；为空时默认使用当前配置命名空间。
-	Namespace string `json:"namespace,omitempty"`
 	// ConfigName 是被继承的 CloudConfig 资源名称。
 	ConfigName string `json:"configName,omitempty"`
 	// Version 是被继承配置的版本；为空时继承公共配置项。
@@ -111,14 +109,19 @@ type ApplyStatus struct {
 	Success bool `json:"success"`
 	// Error 记录本次应用失败时的错误信息。
 	Error string `json:"error,omitempty"`
+	// FailureCount 记录当前配置和策略连续部署失败次数。
+	FailureCount int32 `json:"failureCount,omitempty"`
+	// NextRetryAt 记录自动部署失败后的下次重试时间。
+	NextRetryAt metav1.Time `json:"nextRetryAt,omitempty"`
 }
 
 // +kubebuilder:object:root=true
 // +kubebuilder:subresource:status
+// +kubebuilder:resource:scope=Cluster
 type CloudConfig struct {
 	// TypeMeta 保存 Kubernetes 资源的 apiVersion 和 kind。
 	metav1.TypeMeta `json:",inline"`
-	// ObjectMeta 保存 Kubernetes 资源名称、命名空间、标签、注解等元数据。
+	// ObjectMeta 保存 Kubernetes 资源名称、标签、注解等元数据。
 	metav1.ObjectMeta `json:"metadata,omitempty"`
 
 	// Spec 是用户期望的配置中心配置内容。

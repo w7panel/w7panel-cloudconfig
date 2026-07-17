@@ -2,14 +2,67 @@ package configcenter
 
 import (
 	"testing"
+	"time"
 
 	cloudv1 "github.com/w7panel/w7panel-cloudconfig/api/v1alpha1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
+func TestResolveItemsVersionOverridesPublicRegardlessOfOrder(t *testing.T) {
+	for _, items := range [][]cloudv1.ConfigItem{
+		{{Version: "prod", Name: "MYSQL_HOST", Value: "prod"}, {Name: "MYSQL_HOST", Value: "public"}},
+		{{Name: "MYSQL_HOST", Value: "public"}, {Version: "prod", Name: "MYSQL_HOST", Value: "prod"}},
+	} {
+		cfg := &cloudv1.CloudConfig{ObjectMeta: metav1.ObjectMeta{Name: "app"}, Spec: cloudv1.CloudConfigSpec{Name: "app", Items: items}}
+		resolved, err := ResolveItems(cfg, func(string) (*cloudv1.CloudConfig, bool) { return nil, false }, "prod")
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := ItemsToData(resolved)["MYSQL_HOST"]; got != "prod" {
+			t.Fatalf("expected selected version to override public item, got %q for %#v", got, items)
+		}
+	}
+}
+
+func TestValidateInheritanceGlobalReference(t *testing.T) {
+	base := &cloudv1.CloudConfig{ObjectMeta: metav1.ObjectMeta{Name: "base"}, Spec: cloudv1.CloudConfigSpec{Name: "base"}}
+	child := &cloudv1.CloudConfig{ObjectMeta: metav1.ObjectMeta{Name: "child"}, Spec: cloudv1.CloudConfigSpec{Name: "child", Inherit: &cloudv1.ConfigInherit{ConfigName: "base"}}}
+	lookup := func(name string) (*cloudv1.CloudConfig, bool) {
+		if name == "base" {
+			return base, true
+		}
+		return nil, false
+	}
+	if err := ValidateInheritance(child, lookup); err != nil {
+		t.Fatalf("expected valid global inheritance: %v", err)
+	}
+	child.Spec.Inherit.ConfigName = "missing"
+	if err := ValidateInheritance(child, lookup); err == nil {
+		t.Fatal("expected missing inherited config to fail")
+	}
+	child.Spec.Inherit.ConfigName = "child"
+	if err := ValidateInheritance(child, lookup); err == nil {
+		t.Fatal("expected direct circular inheritance to fail")
+	}
+	child.Spec.Inherit.ConfigName = "base"
+	base.Spec.Inherit = &cloudv1.ConfigInherit{ConfigName: "child"}
+	if err := ValidateInheritance(child, lookup); err == nil {
+		t.Fatal("expected indirect circular inheritance to fail")
+	}
+}
+
+func TestAutoDeployRetryDelay(t *testing.T) {
+	want := []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, 8 * time.Minute, 15 * time.Minute, 15 * time.Minute}
+	for i, expected := range want {
+		if got := AutoDeployRetryDelay(int32(i + 1)); got != expected {
+			t.Fatalf("failure %d: got %s, want %s", i+1, got, expected)
+		}
+	}
+}
+
 func TestResolveItemsInheritAndOverride(t *testing.T) {
 	parent := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "base"},
 		Spec: cloudv1.CloudConfigSpec{
 			Name: "base",
 			Items: []cloudv1.ConfigItem{
@@ -19,7 +72,7 @@ func TestResolveItemsInheritAndOverride(t *testing.T) {
 		},
 	}
 	child := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Spec: cloudv1.CloudConfigSpec{
 			Name:    "app",
 			Inherit: &cloudv1.ConfigInherit{ConfigName: "base", Version: "prod"},
@@ -29,8 +82,8 @@ func TestResolveItemsInheritAndOverride(t *testing.T) {
 			},
 		},
 	}
-	items, err := ResolveItems(child, func(namespace, name string) (*cloudv1.CloudConfig, bool) {
-		if namespace == "default" && name == "base" {
+	items, err := ResolveItems(child, func(name string) (*cloudv1.CloudConfig, bool) {
+		if name == "base" {
 			return parent, true
 		}
 		return nil, false
@@ -52,14 +105,14 @@ func TestResolveItemsInheritAndOverride(t *testing.T) {
 
 func TestResolveItemsCircularInherit(t *testing.T) {
 	a := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "a", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "a"},
 		Spec:       cloudv1.CloudConfigSpec{Name: "a", Inherit: &cloudv1.ConfigInherit{ConfigName: "b"}},
 	}
 	b := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "b", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "b"},
 		Spec:       cloudv1.CloudConfigSpec{Name: "b", Inherit: &cloudv1.ConfigInherit{ConfigName: "a"}},
 	}
-	_, err := ResolveItems(a, func(namespace, name string) (*cloudv1.CloudConfig, bool) {
+	_, err := ResolveItems(a, func(name string) (*cloudv1.CloudConfig, bool) {
 		if name == "a" {
 			return a, true
 		}
@@ -75,7 +128,7 @@ func TestResolveItemsCircularInherit(t *testing.T) {
 
 func TestResolveAllItemsIncludesAllSelfVersions(t *testing.T) {
 	parent := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "base", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "base"},
 		Spec: cloudv1.CloudConfigSpec{
 			Name: "base",
 			Items: []cloudv1.ConfigItem{
@@ -86,7 +139,7 @@ func TestResolveAllItemsIncludesAllSelfVersions(t *testing.T) {
 		},
 	}
 	child := &cloudv1.CloudConfig{
-		ObjectMeta: metav1.ObjectMeta{Name: "app", Namespace: "default"},
+		ObjectMeta: metav1.ObjectMeta{Name: "app"},
 		Spec: cloudv1.CloudConfigSpec{
 			Name:    "app",
 			Inherit: &cloudv1.ConfigInherit{ConfigName: "base", Version: "prod"},
@@ -97,8 +150,8 @@ func TestResolveAllItemsIncludesAllSelfVersions(t *testing.T) {
 			},
 		},
 	}
-	items, err := ResolveAllItems(child, func(namespace, name string) (*cloudv1.CloudConfig, bool) {
-		if namespace == "default" && name == "base" {
+	items, err := ResolveAllItems(child, func(name string) (*cloudv1.CloudConfig, bool) {
+		if name == "base" {
 			return parent, true
 		}
 		return nil, false

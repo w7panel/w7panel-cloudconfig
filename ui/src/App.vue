@@ -6,7 +6,6 @@
         <div class="muted">统一管理多应用共享配置、环境差异配置和部署策略</div>
       </div>
       <a-space>
-        <a-input v-model="namespace" placeholder="namespace" style="width: 180px" @press-enter="refresh" />
         <a-button @click="refresh"><template #icon><icon-refresh /></template></a-button>
         <a-button type="primary" @click="openCreate"><template #icon><icon-plus /></template>新建配置</a-button>
       </a-space>
@@ -108,8 +107,14 @@
               </a-table-column>
               <a-table-column title="状态" :width="100">
                 <template #cell="{ record }">
-                  <a-tag :color="isStale(record) ? 'red' : 'green'">{{ isStale(record) ? '待应用' : '已应用' }}</a-tag>
+                  <a-tooltip v-if="strategyFailed(record)" :content="lastApplyStatus(record)?.error || '应用失败'">
+                    <a-tag color="red">应用失败</a-tag>
+                  </a-tooltip>
+                  <a-tag v-else :color="isStale(record) ? 'orange' : 'green'">{{ isStale(record) ? '待应用' : '已应用' }}</a-tag>
                 </template>
+              </a-table-column>
+              <a-table-column title="下次自动重试" :width="190">
+                <template #cell="{ record }">{{ record.autoDeploy && strategyFailed(record) && lastApplyStatus(record)?.nextRetryAt ? formatDate(lastApplyStatus(record).nextRetryAt) : '-' }}</template>
               </a-table-column>
               <a-table-column title="操作" :width="230">
                 <template #cell="{ record, rowIndex }">
@@ -177,6 +182,9 @@
     <a-modal v-model:visible="strategyVisible" :title="strategyIndex > -1 ? '编辑部署策略' : '新增部署策略'" width="820px" @ok="saveStrategy">
       <a-form :model="strategyForm" auto-label-width>
         <a-form-item label="策略类型"><a-radio-group v-model="strategyForm.type"><a-radio value="env">环境变量类型</a-radio><a-radio value="file">配置文件类型</a-radio></a-radio-group></a-form-item>
+        <a-form-item label="部署 namespace">
+          <a-space><a-input v-model="targetNamespace" style="width: 320px" @press-enter="reloadTargets" /><a-button @click="reloadTargets"><template #icon><icon-refresh /></template></a-button></a-space>
+        </a-form-item>
         <a-form-item label="部署目标">
           <a-select v-model="targetValue" allow-search placeholder="选择应用容器" style="width: 620px">
             <a-option v-for="target in targetOptions" :key="target.value" :value="target.value" :label="target.label" />
@@ -199,10 +207,10 @@
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { formatDate, isRecent, isStrategyStale, parseQuick, uid, versionsOf } from './utils'
+import { formatDate, inheritOptionValue, isRecent, isStrategyStale, parseQuick, uid, versionsOf } from './utils'
 import { applyStrategy, createConfig, deleteConfig, listConfigs, listTargets, resolveConfig, updateConfig } from './api'
 
-const namespace = ref(window?.$wujie?.props?.namespace || 'default')
+const targetNamespace = ref(window?.$wujie?.props?.namespace || 'default')
 const loading = ref(false)
 const configs = ref([])
 const current = ref(null)
@@ -223,17 +231,17 @@ const applyStrategyId = ref('')
 const applyTargetLabel = ref('')
 const applyForm = reactive({ version: '', autoDeploy: false })
 
-const emptyForm = () => ({ apiVersion: 'cloudconfig.w7.cc/v1alpha1', kind: 'CloudConfig', metadata: { namespace: namespace.value, name: '' }, spec: { name: '', items: [], strategies: [] } })
+const emptyForm = () => ({ apiVersion: 'cloudconfig.w7.cc/v1alpha1', kind: 'CloudConfig', metadata: { name: '' }, spec: { name: '', items: [], strategies: [] } })
 const form = reactive(emptyForm())
-const strategyForm = reactive({ id: '', type: 'env', target: { namespace: namespace.value, kind: '', name: '', container: '', group: '' }, mountPath: '', autoDeploy: false, lastSelectedVersion: '' })
+const strategyForm = reactive({ id: '', type: 'env', target: { namespace: targetNamespace.value, kind: '', name: '', container: '', group: '' }, mountPath: '', autoDeploy: false, lastSelectedVersion: '' })
 
 const rows = computed(() => configs.value.map((item) => ({ ...item, recent: isRecent(item.status), versionCount: versionsOf([item]).length })))
 const inheritOptions = computed(() => {
   const options = []
   configs.value.forEach((cfg) => {
     if (cfg.metadata.name === form.metadata.name) return
-    options.push({ value: JSON.stringify({ namespace: cfg.metadata.namespace, configName: cfg.metadata.name, version: '' }), label: `${cfg.spec.name} / 公共配置` })
-    versionsOf([cfg]).forEach((version) => options.push({ value: JSON.stringify({ namespace: cfg.metadata.namespace, configName: cfg.metadata.name, version }), label: `${cfg.spec.name} / ${version}` }))
+    options.push({ value: inheritOptionValue({ configName: cfg.metadata.name }), label: `${cfg.spec.name} / 公共配置` })
+    versionsOf([cfg]).forEach((version) => options.push({ value: inheritOptionValue({ configName: cfg.metadata.name, version }), label: `${cfg.spec.name} / ${version}` }))
   })
   return options
 })
@@ -251,7 +259,7 @@ const targetOptions = computed(() => {
 async function refresh() {
   loading.value = true
   try {
-    configs.value = await listConfigs(namespace.value)
+    configs.value = await listConfigs()
     if (current.value) {
       current.value = configs.value.find((item) => item.metadata.name === current.value.metadata.name) || current.value
       await loadResolved()
@@ -270,11 +278,11 @@ function inheritLabel(record) {
 
 function assignForm(data) {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(data || emptyForm())))
-  form.metadata.namespace = form.metadata.namespace || namespace.value
+  delete form.metadata.namespace
   form.spec.items = form.spec.items || []
   form.spec.strategies = form.spec.strategies || []
   formVersions.value = versionsOf([form])
-  inheritValue.value = form.spec.inherit?.configName ? JSON.stringify(form.spec.inherit) : ''
+  inheritValue.value = form.spec.inherit?.configName ? inheritOptionValue(form.spec.inherit) : ''
 }
 
 function openCreate() {
@@ -301,7 +309,7 @@ async function setVersion(version) {
 
 async function loadResolved() {
   if (!current.value) return
-  const result = await resolveConfig(current.value.metadata.namespace, current.value.metadata.name, versionFilter.value)
+  const result = await resolveConfig(current.value.metadata.name, versionFilter.value)
   resolvedItems.value = (result.items || []).map((item, index) => ({ ...item, _rowKey: resolvedRowKey(item, index) }))
 }
 
@@ -321,9 +329,9 @@ async function saveConfig() {
   }
   form.spec.inherit = inheritValue.value ? JSON.parse(inheritValue.value) : null
   if (form.metadata.name) {
-    await updateConfig(form.metadata.namespace, form.metadata.name, form)
+    await updateConfig(form.metadata.name, form)
   } else {
-    await createConfig(form, namespace.value)
+    await createConfig(form)
   }
   formVisible.value = false
   Message.success('保存成功')
@@ -331,19 +339,25 @@ async function saveConfig() {
 }
 
 async function remove(record) {
-  await deleteConfig(record.metadata.namespace, record.metadata.name)
+  await deleteConfig(record.metadata.name)
   Message.success('删除成功')
   await refresh()
 }
 
 async function ensureTargets() {
-  targets.value = await listTargets(namespace.value)
+  targets.value = await listTargets(targetNamespace.value)
+}
+
+async function reloadTargets() {
+  targetValue.value = ''
+  await ensureTargets()
 }
 
 async function openStrategy(record = null, index = -1) {
+  if (record?.target?.namespace) targetNamespace.value = record.target.namespace
   await ensureTargets()
   strategyIndex.value = index
-  Object.assign(strategyForm, record ? JSON.parse(JSON.stringify(record)) : { id: uid('strategy'), type: 'env', target: { namespace: namespace.value, kind: '', name: '', container: '', group: '' }, mountPath: '', autoDeploy: false, lastSelectedVersion: '' })
+  Object.assign(strategyForm, record ? JSON.parse(JSON.stringify(record)) : { id: uid('strategy'), type: 'env', target: { namespace: targetNamespace.value, kind: '', name: '', container: '', group: '' }, mountPath: '', autoDeploy: false, lastSelectedVersion: '' })
   targetValue.value = strategyForm.target?.name ? JSON.stringify(strategyForm.target) : ''
   strategyVisible.value = true
 }
@@ -363,7 +377,7 @@ async function saveStrategy() {
   if (strategyIndex.value > -1) strategies.splice(strategyIndex.value, 1, payload)
   else strategies.push(payload)
   current.value.spec.strategies = strategies
-  await updateConfig(current.value.metadata.namespace, current.value.metadata.name, current.value)
+  await updateConfig(current.value.metadata.name, current.value)
   strategyVisible.value = false
   Message.success('策略已保存')
   await refresh()
@@ -371,7 +385,7 @@ async function saveStrategy() {
 
 async function removeStrategy(index) {
   current.value.spec.strategies.splice(index, 1)
-  await updateConfig(current.value.metadata.namespace, current.value.metadata.name, current.value)
+  await updateConfig(current.value.metadata.name, current.value)
   Message.success('策略已删除')
   await refresh()
 }
@@ -380,8 +394,17 @@ function isStale(strategy) {
   return isStrategyStale(current.value, strategy.id, strategy)
 }
 
+function lastApplyStatus(strategy) {
+  return (current.value?.status?.lastApplied || []).find((item) => item.strategyId === strategy.id) || null
+}
+
+function strategyFailed(strategy) {
+  const status = lastApplyStatus(strategy)
+  return !!status && !status.success && isStale(strategy)
+}
+
 function resolvedRowKey(record, index) {
-  return `${record.source || 'self'}:${record.sourceNamespace || ''}:${record.sourceName || ''}:${record.version || ''}:${record.name}:${index}`
+  return `${record.source || 'self'}:${record.sourceName || ''}:${record.version || ''}:${record.name}:${index}`
 }
 
 function openApply(strategy) {
@@ -393,7 +416,12 @@ function openApply(strategy) {
 }
 
 async function doApply() {
-  await applyStrategy(current.value.metadata.namespace, current.value.metadata.name, applyStrategyId.value, applyForm)
+  try {
+    await applyStrategy(current.value.metadata.name, applyStrategyId.value, applyForm)
+  } catch {
+    await refresh()
+    return
+  }
   Message.success('应用成功')
   applyVisible.value = false
   await refresh()

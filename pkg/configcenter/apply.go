@@ -22,7 +22,7 @@ type ApplyResult struct {
 	Revision      string `json:"revision"`
 }
 
-func ApplyStrategy(ctx context.Context, client ctrlclient.Client, config *cloudv1.CloudConfig, lookup func(namespace, name string) (*cloudv1.CloudConfig, bool), strategy cloudv1.DeployStrategy, version string) (*ApplyResult, error) {
+func ApplyStrategy(ctx context.Context, client ctrlclient.Client, config *cloudv1.CloudConfig, lookup func(name string) (*cloudv1.CloudConfig, bool), strategy cloudv1.DeployStrategy, version string) (*ApplyResult, error) {
 	items, err := ResolveItems(config, lookup, version)
 	if err != nil {
 		return nil, err
