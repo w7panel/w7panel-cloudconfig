@@ -32,15 +32,21 @@ function setupWindow({ microapp = true, path = '/', search = '', emit } = {}) {
   globalThis.localStorage = new MemoryStorage()
   globalThis.window = {
     __POWERED_BY_WUJIE__: microapp,
-    $wujie: {
-      props: { url: 'https://panel.example/backend', backendUrl: '/wrong-backend' },
-      bus: { $emit: emit || vi.fn() },
-    },
     crypto: webcrypto,
     setTimeout,
     clearTimeout,
     location: { pathname: path, search, hash: '', assign: vi.fn() },
     history: { replaceState: vi.fn() },
+  }
+  if (microapp) {
+    window.$wujie = {
+      props: {
+        url: 'https://panel.example/backend',
+        backendUrl: '/wrong-backend',
+        paneltoken: 'panel-proxy-token',
+      },
+      bus: { $emit: emit || vi.fn() },
+    }
   }
 }
 
@@ -78,7 +84,12 @@ describe('cloudconfig auth', () => {
     expect(emit).toHaveBeenCalledTimes(1)
     expect(emit.mock.calls[0][0]).toBe('getOidcCode')
     expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: 'https://panel.example/backend', timeout: 15000 })
-    expect(axiosMock.client.post).toHaveBeenCalledWith('/cloudconfig-api/v1/login', { code: 'oidc-code' })
+    expect(axiosMock.client.get).toHaveBeenCalledWith('/cloudconfig-api/v1/login/config', {
+      headers: { 'X-W7Panel-Token': 'panel-proxy-token' },
+    })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/cloudconfig-api/v1/login', { code: 'oidc-code' }, {
+      headers: { 'X-W7Panel-Token': 'panel-proxy-token' },
+    })
     expect(auth.getToken()).toBe('signed-id-token')
   })
 
@@ -92,7 +103,22 @@ describe('cloudconfig auth', () => {
     await expect(auth.bootstrapAuth()).resolves.toBe('callback-token')
     expect(window.history.replaceState).toHaveBeenCalledWith({}, '', '/configs?namespace=default')
     expect(axiosMock.create).toHaveBeenCalledWith({ baseURL: '', timeout: 15000 })
+    expect(axiosMock.client.post).toHaveBeenCalledWith('/cloudconfig-api/v1/login', { code: 'code-1' }, undefined)
     expect(auth.getToken()).toBe('callback-token')
+  })
+
+  it('uses the CKM-compatible local panel token fallback', async () => {
+    setupWindow()
+    delete window.$wujie.props.paneltoken
+    localStorage.setItem('panelToken', 'stored-panel-token')
+    axiosMock.client.get.mockResolvedValue({ data: {} })
+    const auth = await import('./auth.js')
+
+    await auth.getLoginConfig()
+
+    expect(axiosMock.client.get).toHaveBeenCalledWith('/cloudconfig-api/v1/login/config', {
+      headers: { 'X-W7Panel-Token': 'stored-panel-token' },
+    })
   })
 
   it('rejects a callback with a mismatched OAuth state', async () => {

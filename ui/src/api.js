@@ -1,7 +1,7 @@
 import axios from 'axios'
 import { Message } from '@arco-design/web-vue'
 import { clearToken, fetchToken, getToken } from './auth'
-import { getAPIBaseURL } from './request-base'
+import { getAPIBaseURL, getPanelProxyToken } from './request-base'
 
 const request = axios.create({
   baseURL: getAPIBaseURL(),
@@ -13,6 +13,10 @@ request.interceptors.request.use((config) => {
   config.headers = config.headers || {}
   if (token) {
     config.headers['Authorization-config'] = `Bearer ${token}`
+  }
+  const panelToken = getPanelProxyToken()
+  if (panelToken) {
+    config.headers['X-W7Panel-Token'] = panelToken
   }
   return config
 })

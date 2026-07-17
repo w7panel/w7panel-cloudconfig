@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getAPIBaseURL } from './request-base'
+import { getAPIBaseURL, getPanelProxyRequestConfig } from './request-base'
 
 const TOKEN_KEY = 'cloudconfig-token'
 const OAUTH_STATE_KEY = 'cloudconfig-oauth-state'
@@ -32,12 +32,12 @@ export function clearToken() {
 }
 
 export async function getLoginConfig() {
-  const { data } = await authRequest.get('/cloudconfig-api/v1/login/config')
+  const { data } = await authRequest.get('/cloudconfig-api/v1/login/config', getPanelProxyRequestConfig())
   return data
 }
 
 export async function exchangeLoginCode(code) {
-  const { data } = await authRequest.post('/cloudconfig-api/v1/login', { code })
+  const { data } = await authRequest.post('/cloudconfig-api/v1/login', { code }, getPanelProxyRequestConfig())
   setToken(data.access_token)
   return data
 }
