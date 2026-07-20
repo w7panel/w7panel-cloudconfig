@@ -141,15 +141,16 @@
             <a-option v-for="option in inheritOptions" :key="option.value" :value="option.value" :label="option.label" />
           </a-select>
         </a-form-item>
-        <a-form-item label="文本快速配置">
+        <a-form-item label="批量导入配置项">
           <div class="full">
             <a-space>
-              <a-select v-model="quickVersion" allow-clear allow-search style="width: 180px" placeholder="导入版本">
+              <a-select v-model="quickVersion" allow-clear allow-search style="width: 180px" placeholder="目标版本">
                 <a-option v-for="v in formVersions" :key="v" :value="v" />
               </a-select>
-              <a-button type="primary" @click="importQuick">导入到表格</a-button>
+              <a-button type="primary" @click="importQuick">解析并添加</a-button>
             </a-space>
-            <a-textarea v-model="quickText" style="margin-top: 8px" :auto-size="{ minRows: 4, maxRows: 8 }" placeholder="多行 key=value" />
+            <a-textarea v-model="quickText" style="margin-top: 8px" :auto-size="{ minRows: 4, maxRows: 8 }" placeholder="每行一个 name=value" />
+            <div class="muted" style="margin-top: 6px">每行一个 name=value，解析后添加到下方配置项；文本内容不会单独保存。</div>
           </div>
         </a-form-item>
         <a-form-item label="配置项" required>
