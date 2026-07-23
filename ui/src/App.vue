@@ -4,17 +4,16 @@
       <header class="editor-bar">
         <button class="back-link" type="button" @click="closeEditor"><icon-left />取消</button>
         <div>
-          <div class="eyebrow">CONFIGURATION WORKBENCH</div>
           <h1>{{ form.metadata.name ? '编辑配置' : '新建配置' }}</h1>
         </div>
-        <a-button type="primary" size="large" :loading="saving" @click="saveConfig">保存配置</a-button>
+        <a-button type="primary" :loading="saving" @click="saveConfig">保存配置</a-button>
       </header>
 
       <div class="editor-canvas">
         <section class="identity-grid">
           <div class="field-block">
             <label>配置名称 <span class="required">*</span></label>
-            <a-input v-model="form.spec.name" size="large" placeholder="例如：核心数据库连接" />
+            <a-input v-model="form.spec.name" placeholder="例如：核心数据库连接" />
             <p>使用业务能识别的名称，不需要包含 namespace。</p>
           </div>
           <div class="field-block">
@@ -23,7 +22,6 @@
               v-model="inheritValue"
               allow-clear
               allow-search
-              size="large"
               placeholder="搜索配置名称或版本"
               @change="loadInheritedPreview"
             >
@@ -35,16 +33,12 @@
 
         <section class="version-board">
           <div class="section-heading compact-heading">
-            <div>
-              <span class="section-kicker">VERSION POOL</span>
-              <h2>版本池</h2>
-            </div>
+            <h2>版本池</h2>
             <span class="section-note">配置项留空版本时，将作为所有环境共享的公共配置</span>
           </div>
           <a-input-tag
             v-model="formVersions"
             allow-clear
-            size="large"
             placeholder="输入版本名并回车，例如 dev、staging、prod"
             @change="guardVersionPool"
           />
@@ -53,7 +47,6 @@
         <section class="workbench">
           <div class="workbench-head">
             <div>
-              <span class="section-kicker">CONFIGURATION ITEMS</span>
               <h2>配置工作表</h2>
               <p>{{ form.spec.items.length }} 条当前配置<span v-if="inheritedItems.length">，{{ inheritedItems.length }} 条继承配置</span></p>
             </div>
@@ -131,13 +124,12 @@
     <template v-else-if="!current">
       <header class="page-hero">
         <div>
-          <div class="eyebrow">SHARED CONFIGURATION CONTROL</div>
           <h1>配置中心</h1>
-          <p>把共享服务、环境差异和部署目标放在一条可追踪的配置流上。</p>
+          <p>统一管理多应用共享配置、环境差异和部署策略。</p>
         </div>
         <div class="hero-actions">
-          <a-button size="large" :loading="loading" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button>
-          <a-button type="primary" size="large" @click="openCreate"><template #icon><icon-plus /></template>新建配置</a-button>
+          <a-button :loading="loading" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button>
+          <a-button type="primary" @click="openCreate"><template #icon><icon-plus /></template>新建配置</a-button>
         </div>
       </header>
 
@@ -173,16 +165,16 @@
             <a-table-column title="版本" :width="210">
               <template #cell="{ record }">
                 <div class="tag-cluster">
-                  <span class="version-pill public-pill">公共</span>
-                  <span v-for="version in versionsOf([record]).slice(0, 3)" :key="version" class="version-pill">{{ version }}</span>
-                  <span v-if="versionsOf([record]).length > 3" class="more-pill">+{{ versionsOf([record]).length - 3 }}</span>
+                  <a-tag color="arcoblue">公共</a-tag>
+                  <a-tag v-for="version in versionsOf([record]).slice(0, 3)" :key="version">{{ version }}</a-tag>
+                  <a-tag v-if="versionsOf([record]).length > 3">+{{ versionsOf([record]).length - 3 }}</a-tag>
                 </div>
               </template>
             </a-table-column>
             <a-table-column title="继承来源" :width="220"><template #cell="{ record }"><span :class="['lineage-text', { empty: !record.spec.inherit?.configName }]">{{ inheritLabel(record) }}</span></template></a-table-column>
             <a-table-column title="配置项" :width="100"><template #cell="{ record }"><strong class="data-number">{{ record.spec.items?.length || 0 }}</strong></template></a-table-column>
             <a-table-column title="部署状态" :width="170">
-              <template #cell="{ record }"><span :class="['status-chip', deploySummary(record).tone]"><i></i>{{ deploySummary(record).label }}</span></template>
+              <template #cell="{ record }"><a-tag :color="deployTagColor(deploySummary(record).tone)">{{ deploySummary(record).label }}</a-tag></template>
             </a-table-column>
             <a-table-column title="更新时间" :width="210">
               <template #cell="{ record }">
@@ -195,7 +187,7 @@
             <a-table-column title="" :width="150" fixed="right">
               <template #cell="{ record }">
                 <div class="row-actions">
-                  <a-button size="small" @click="openEdit(record)">编辑</a-button>
+                  <a-button size="small" type="text" @click="openEdit(record)">编辑</a-button>
                   <a-popconfirm content="删除后无法恢复，确定继续？" @ok="remove(record)"><a-button size="small" type="text" status="danger">删除</a-button></a-popconfirm>
                 </div>
               </template>
@@ -203,10 +195,9 @@
           </template>
         </a-table>
         <div v-if="!loading && !loadError && !filteredRows.length" class="ledger-empty">
-          <div class="empty-orbit"><icon-branch /></div>
-          <h2>{{ rows.length ? '没有符合筛选条件的配置' : '创建第一条配置流' }}</h2>
-          <p>{{ rows.length ? '调整搜索或筛选条件后再试。' : '从一套共享数据库、Redis 或对象存储配置开始。' }}</p>
-          <a-button v-if="!rows.length" type="primary" @click="openCreate">新建配置</a-button>
+          <a-empty :description="rows.length ? '没有符合筛选条件的配置' : '暂无配置'">
+            <template #extra><a-button v-if="!rows.length" type="primary" @click="openCreate">新建配置</a-button></template>
+          </a-empty>
         </div>
       </section>
     </template>
@@ -216,24 +207,23 @@
         <button class="back-link" type="button" @click="current = null"><icon-left />返回配置列表</button>
         <div class="detail-title-row">
           <div>
-            <div class="eyebrow">CONFIGURATION FLOW</div>
             <h1>{{ current.spec.name }}</h1>
             <p>{{ current.metadata.name }}</p>
           </div>
-          <a-button type="primary" size="large" @click="openEdit(current)"><template #icon><icon-edit /></template>编辑配置</a-button>
+          <a-button type="primary" @click="openEdit(current)"><template #icon><icon-edit /></template>编辑配置</a-button>
         </div>
 
-        <div :class="['flow-rail', { flowing: detailPendingCount > 0 }]">
+        <div class="flow-rail">
           <div class="flow-node source-node">
             <span class="node-icon"><icon-link /></span>
             <div><small>继承来源</small><strong>{{ inheritLabel(current) }}</strong></div>
           </div>
-          <span class="rail-segment"><i></i></span>
+          <span class="rail-segment"><icon-right /></span>
           <div class="flow-node current-node">
             <span class="node-icon"><icon-code-square /></span>
             <div><small>当前配置</small><strong>{{ current.spec.items?.length || 0 }} 项 · {{ versionsOf([current]).length }} 个版本</strong></div>
           </div>
-          <span class="rail-segment"><i></i></span>
+          <span class="rail-segment"><icon-right /></span>
           <div class="flow-node target-node">
             <span class="node-icon"><icon-apps /></span>
             <div><small>部署目标</small><strong>{{ current.spec.strategies?.length || 0 }} 个策略 · {{ detailPendingCount }} 个待应用</strong></div>
@@ -273,24 +263,36 @@
             <div><h2>部署策略</h2><p>策略保存后不会立即生效，需要手动应用或开启自动部署。</p></div>
             <a-button type="primary" @click="openStrategy()"><template #icon><icon-plus /></template>新增部署策略</a-button>
           </div>
-          <div v-if="current.spec.strategies?.length" class="strategy-list">
-            <article v-for="(strategy, index) in current.spec.strategies" :key="strategy.id" class="strategy-row">
-              <div class="strategy-type"><span><icon-code v-if="strategy.type === 'env'" /><icon-file v-else /></span><div><strong>{{ strategy.type === 'file' ? '配置文件' : '环境变量' }}</strong><small>{{ strategy.type === 'file' ? strategy.mountPath : '作为容器环境变量注入' }}</small></div></div>
-              <div class="strategy-target"><small>部署到</small><strong>{{ strategy.target.group || strategy.target.namespace }} / {{ strategy.target.name }}</strong><code>{{ strategy.target.kind }} · {{ strategy.target.container }}</code></div>
-              <div class="strategy-version"><small>配置版本</small><strong>{{ strategy.lastSelectedVersion || '公共配置' }}</strong><span>{{ strategy.autoDeploy ? '自动部署已开启' : '手动应用' }}</span></div>
-              <div class="strategy-state">
-                <a-tooltip v-if="strategyFailed(strategy)" :content="lastApplyStatus(strategy)?.error || '应用失败'"><span class="status-chip failed"><i></i>应用失败</span></a-tooltip>
-                <span v-else :class="['status-chip', isStale(strategy) ? 'pending' : 'ready']"><i></i>{{ isStale(strategy) ? '待应用' : '已应用' }}</span>
-                <small v-if="strategy.autoDeploy && strategyFailed(strategy) && lastApplyStatus(strategy)?.nextRetryAt">{{ formatDate(lastApplyStatus(strategy).nextRetryAt) }} 重试</small>
-              </div>
-              <div class="strategy-actions">
-                <a-button size="small" @click="openStrategy(strategy, index)">编辑</a-button>
-                <a-popconfirm content="确定删除该部署策略？" @ok="removeStrategy(index)"><a-button size="small" type="text" status="danger">删除</a-button></a-popconfirm>
-                <a-button size="small" type="primary" :disabled="!isStale(strategy)" @click="openApply(strategy)">应用</a-button>
-              </div>
-            </article>
-          </div>
-          <div v-else class="ledger-empty compact-empty"><div class="empty-orbit"><icon-send /></div><h2>还没有部署策略</h2><p>选择应用容器，把当前配置作为环境变量或配置文件应用过去。</p><a-button type="primary" @click="openStrategy()">新增部署策略</a-button></div>
+          <a-table v-if="current.spec.strategies?.length" :data="current.spec.strategies" :pagination="false" row-key="id" class="strategy-table" :scroll="{ x: 1080 }">
+            <template #columns>
+              <a-table-column title="部署应用" :width="280">
+                <template #cell="{ record }">
+                  <div class="target-cell"><span>{{ record.target.group || record.target.namespace }} / {{ record.target.name }}</span><small>{{ record.target.kind }} · {{ record.target.container }}</small></div>
+                </template>
+              </a-table-column>
+              <a-table-column title="类型" :width="130"><template #cell="{ record }">{{ record.type === 'file' ? '配置文件' : '环境变量' }}</template></a-table-column>
+              <a-table-column title="挂载路径" :width="180"><template #cell="{ record }"><code>{{ record.type === 'file' ? record.mountPath : '-' }}</code></template></a-table-column>
+              <a-table-column title="配置版本" :width="130"><template #cell="{ record }">{{ record.lastSelectedVersion || '公共配置' }}</template></a-table-column>
+              <a-table-column title="自动部署" :width="110"><template #cell="{ record }"><a-tag :color="record.autoDeploy ? 'green' : 'gray'">{{ record.autoDeploy ? '已开启' : '已关闭' }}</a-tag></template></a-table-column>
+              <a-table-column title="状态" :width="160">
+                <template #cell="{ record }">
+                  <a-tooltip v-if="strategyFailed(record)" :content="lastApplyStatus(record)?.error || '应用失败'"><a-tag color="red">应用失败</a-tag></a-tooltip>
+                  <a-tag v-else :color="isStale(record) ? 'orange' : 'green'">{{ isStale(record) ? '待应用' : '已应用' }}</a-tag>
+                  <small v-if="record.autoDeploy && strategyFailed(record) && lastApplyStatus(record)?.nextRetryAt" class="retry-time">{{ formatDate(lastApplyStatus(record).nextRetryAt) }} 重试</small>
+                </template>
+              </a-table-column>
+              <a-table-column title="操作" :width="190" fixed="right">
+                <template #cell="{ record, rowIndex }">
+                  <div class="strategy-actions">
+                    <a-button size="mini" type="text" @click="openStrategy(record, rowIndex)">编辑</a-button>
+                    <a-popconfirm content="确定删除该部署策略？" @ok="removeStrategy(rowIndex)"><a-button size="mini" type="text" status="danger">删除</a-button></a-popconfirm>
+                    <a-button size="mini" type="primary" :disabled="!isStale(record)" @click="openApply(record)">应用</a-button>
+                  </div>
+                </template>
+              </a-table-column>
+            </template>
+          </a-table>
+          <div v-else class="ledger-empty compact-empty"><a-empty description="暂无部署策略"><template #extra><a-button type="primary" @click="openStrategy()">新增部署策略</a-button></template></a-empty></div>
         </div>
       </section>
     </template>
@@ -445,6 +447,10 @@ function deploySummary(record) {
   const pending = strategies.filter((strategy) => isStrategyStale(record, strategy.id, strategy)).length
   if (pending) return { state: 'pending', tone: 'pending', label: `${pending} 个待应用` }
   return { state: 'ready', tone: 'ready', label: '全部已应用' }
+}
+
+function deployTagColor(tone) {
+  return { ready: 'green', pending: 'orange', failed: 'red', neutral: 'gray' }[tone] || 'gray'
 }
 
 function assignForm(data) {
