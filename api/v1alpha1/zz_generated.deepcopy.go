@@ -51,6 +51,9 @@ func (in *CloudConfigSpec) DeepCopy() *CloudConfigSpec {
 	}
 	out := new(CloudConfigSpec)
 	*out = *in
+	if in.Versions != nil {
+		out.Versions = append([]string(nil), in.Versions...)
+	}
 	if in.Items != nil {
 		out.Items = append([]ConfigItem(nil), in.Items...)
 	}

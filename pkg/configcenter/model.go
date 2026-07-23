@@ -34,6 +34,17 @@ func NormalizeConfig(config *cloudv1.CloudConfig) {
 	if config.Spec.Name != "" {
 		config.Labels[cloudv1.CloudConfigLabelName] = sanitizeLabel(config.Spec.Name)
 	}
+	versions := make([]string, 0, len(config.Spec.Versions))
+	seenVersions := map[string]bool{}
+	for _, version := range config.Spec.Versions {
+		version = strings.TrimSpace(version)
+		if version == "" || seenVersions[version] {
+			continue
+		}
+		seenVersions[version] = true
+		versions = append(versions, version)
+	}
+	config.Spec.Versions = versions
 	for i := range config.Spec.Items {
 		config.Spec.Items[i].Version = strings.TrimSpace(config.Spec.Items[i].Version)
 		config.Spec.Items[i].Name = strings.TrimSpace(config.Spec.Items[i].Name)
@@ -229,13 +240,15 @@ func AvailableVersions(configs ...*cloudv1.CloudConfig) []string {
 		if cfg == nil {
 			continue
 		}
+		for _, version := range cfg.Spec.Versions {
+			if version != "" {
+				seen[version] = true
+			}
+		}
 		for _, item := range cfg.Spec.Items {
 			if item.Version != "" {
 				seen[item.Version] = true
 			}
-		}
-		if cfg.Spec.Inherit != nil && cfg.Spec.Inherit.Version != "" {
-			seen[cfg.Spec.Inherit.Version] = true
 		}
 	}
 	result := make([]string, 0, len(seen))
@@ -248,13 +261,15 @@ func AvailableVersions(configs ...*cloudv1.CloudConfig) []string {
 
 func Revision(config *cloudv1.CloudConfig) string {
 	data, _ := json.Marshal(struct {
-		Name    string                 `json:"name,omitempty"`
-		Items   []cloudv1.ConfigItem   `json:"items,omitempty"`
-		Inherit *cloudv1.ConfigInherit `json:"inherit,omitempty"`
+		Name     string                 `json:"name,omitempty"`
+		Versions []string               `json:"versions,omitempty"`
+		Items    []cloudv1.ConfigItem   `json:"items,omitempty"`
+		Inherit  *cloudv1.ConfigInherit `json:"inherit,omitempty"`
 	}{
-		Name:    config.Spec.Name,
-		Items:   config.Spec.Items,
-		Inherit: config.Spec.Inherit,
+		Name:     config.Spec.Name,
+		Versions: config.Spec.Versions,
+		Items:    config.Spec.Items,
+		Inherit:  config.Spec.Inherit,
 	})
 	sum := sha256.Sum256(data)
 	return hex.EncodeToString(sum[:])[:16]

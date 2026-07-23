@@ -19,6 +19,8 @@ const (
 type CloudConfigSpec struct {
 	// Name 是展示给用户看的配置名称。
 	Name string `json:"name,omitempty"`
+	// Versions 是配置可使用的版本池；配置项的 Version 为空时仍表示公共配置。
+	Versions []string `json:"versions,omitempty"`
 	// Items 是当前配置自身维护的配置项列表。
 	Items []ConfigItem `json:"items,omitempty"`
 	// Inherit 指定当前配置继承的底层配置；为空表示不继承其他配置。

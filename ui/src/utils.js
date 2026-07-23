@@ -24,12 +24,38 @@ export function timeValue(value) {
 }
 
 export function versionsOf(configs = []) {
+  const result = []
   const set = new Set()
+  const append = (version) => {
+    const normalized = String(version || '').trim()
+    if (!normalized || set.has(normalized)) return
+    set.add(normalized)
+    result.push(normalized)
+  }
   configs.forEach((config) => {
-    ;(config.spec?.items || []).forEach((item) => item.version && set.add(item.version))
-    if (config.spec?.inherit?.version) set.add(config.spec.inherit.version)
+    ;(config?.spec?.versions || []).forEach(append)
   })
-  return Array.from(set).sort()
+  const legacy = []
+  configs.forEach((config) => {
+    ;(config?.spec?.items || []).forEach((item) => {
+      const version = String(item.version || '').trim()
+      if (version && !set.has(version)) legacy.push(version)
+    })
+  })
+  legacy.sort().forEach(append)
+  return result
+}
+
+export function normalizeVersions(versions = []) {
+  const result = []
+  const seen = new Set()
+  versions.forEach((version) => {
+    const normalized = String(version || '').trim()
+    if (!normalized || seen.has(normalized)) return
+    seen.add(normalized)
+    result.push(normalized)
+  })
+  return result
 }
 
 export function normalizeInherit(inherit = {}) {

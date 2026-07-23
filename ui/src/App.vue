@@ -1,226 +1,371 @@
 <template>
-  <div class="page">
-    <div class="toolbar">
-      <div>
-        <div class="title">配置中心</div>
-        <div class="muted">统一管理多应用共享配置、环境差异配置和部署策略</div>
-      </div>
-      <a-space>
-        <a-button @click="refresh"><template #icon><icon-refresh /></template></a-button>
-        <a-button type="primary" @click="openCreate"><template #icon><icon-plus /></template>新建配置</a-button>
-      </a-space>
-    </div>
-
-    <div v-if="!current" class="panel">
-      <a-table :data="rows" :pagination="false" row-key="metadata.name" :loading="loading">
-        <template #columns>
-          <a-table-column title="名称">
-            <template #cell="{ record }">
-              <span class="link" @click="openDetail(record)">{{ record.spec.name }}</span>
-              <icon-sync v-if="record.recent" class="danger" style="margin-left: 6px" />
-            </template>
-          </a-table-column>
-          <a-table-column title="版本数" :width="110">
-            <template #cell="{ record }">{{ record.versionCount }}</template>
-          </a-table-column>
-          <a-table-column title="配置项" :width="110">
-            <template #cell="{ record }">{{ record.spec.items?.length || 0 }}</template>
-          </a-table-column>
-          <a-table-column title="继承配置" :width="220">
-            <template #cell="{ record }">{{ inheritLabel(record) }}</template>
-          </a-table-column>
-          <a-table-column title="创建时间" :width="190">
-            <template #cell="{ record }">{{ formatDate(record.status.createdAt || record.metadata.creationTimestamp) }}</template>
-          </a-table-column>
-          <a-table-column title="更新时间" :width="220">
-            <template #cell="{ record }">
-              <span :class="{ danger: record.recent }">{{ formatDate(record.status.updatedAt || record.metadata.creationTimestamp) }}</span>
-              <a-tag v-if="record.recent" color="red" style="margin-left: 8px">更新</a-tag>
-            </template>
-          </a-table-column>
-          <a-table-column title="操作" :width="180">
-            <template #cell="{ record }">
-              <div class="table-actions">
-                <a-button size="mini" @click="openEdit(record)">编辑</a-button>
-                <a-popconfirm content="确定删除该配置？" @ok="remove(record)">
-                  <a-button size="mini" status="danger">删除</a-button>
-                </a-popconfirm>
-              </div>
-            </template>
-          </a-table-column>
-        </template>
-      </a-table>
-    </div>
-
-    <div v-else class="panel">
-      <div class="toolbar">
+  <main class="cloud-shell">
+    <section v-if="editing" class="editor-page">
+      <header class="editor-bar">
+        <button class="back-link" type="button" @click="closeEditor"><icon-left />取消</button>
         <div>
-          <a-button type="text" @click="current = null"><template #icon><icon-left /></template>返回</a-button>
-          <div class="title">{{ current.spec.name }}</div>
-          <div class="muted">
-            更新时间：
-            <span :class="{ danger: isRecent(current.status) }">{{ formatDate(current.status.updatedAt || current.metadata.creationTimestamp) }}</span>
-          </div>
+          <div class="eyebrow">CONFIGURATION WORKBENCH</div>
+          <h1>{{ form.metadata.name ? '编辑配置' : '新建配置' }}</h1>
         </div>
-        <a-button type="primary" @click="openEdit(current)"><template #icon><icon-edit /></template>编辑配置</a-button>
-      </div>
+        <a-button type="primary" size="large" :loading="saving" @click="saveConfig">保存配置</a-button>
+      </header>
 
-      <a-tabs v-model:active-key="activeTab">
-        <a-tab-pane key="data" title="配置数据">
-          <a-space wrap style="margin-bottom: 12px">
-            <a-tag class="link" :color="versionFilter === null ? 'arcoblue' : 'gray'" @click="setVersion(null)">全部</a-tag>
-            <a-tag v-for="v in versionsOf([current])" :key="v" class="link" :color="versionFilter === v ? 'arcoblue' : 'gray'" @click="setVersion(v)">{{ v }}</a-tag>
-          </a-space>
-          <a-table :data="resolvedItems" :pagination="false" row-key="_rowKey">
-            <template #columns>
-              <a-table-column title="version" :width="120">
-                <template #cell="{ record }">{{ record.version || '公共' }}</template>
-              </a-table-column>
-              <a-table-column title="name" data-index="name" />
-              <a-table-column title="value" data-index="value" />
-              <a-table-column title="remark" data-index="remark" />
-              <a-table-column title="来源" :width="160">
-                <template #cell="{ record }">
-                  <a-tag :color="record.source === 'inherit' ? 'arcoblue' : 'green'">{{ record.source === 'inherit' ? `继承 ${record.sourceTitle}` : '当前配置' }}</a-tag>
-                </template>
-              </a-table-column>
-            </template>
-          </a-table>
-        </a-tab-pane>
-        <a-tab-pane key="deploy" title="配置部署">
-          <div class="row-tools">
-            <a-button type="primary" @click="openStrategy()"><template #icon><icon-plus /></template>新增部署策略</a-button>
+      <div class="editor-canvas">
+        <section class="identity-grid">
+          <div class="field-block">
+            <label>配置名称 <span class="required">*</span></label>
+            <a-input v-model="form.spec.name" size="large" placeholder="例如：核心数据库连接" />
+            <p>使用业务能识别的名称，不需要包含 namespace。</p>
           </div>
-          <a-table :data="current.spec.strategies || []" :pagination="false" row-key="id">
-            <template #columns>
-              <a-table-column title="部署应用">
-                <template #cell="{ record }">{{ record.target.namespace }} / {{ record.target.kind }} / {{ record.target.name }} / {{ record.target.container }}</template>
-              </a-table-column>
-              <a-table-column title="类型" :width="120">
-                <template #cell="{ record }">{{ record.type === 'file' ? '配置文件' : '环境变量' }}</template>
-              </a-table-column>
-              <a-table-column title="挂载路径" :width="180">
-                <template #cell="{ record }">{{ record.type === 'file' ? record.mountPath : '-' }}</template>
-              </a-table-column>
-              <a-table-column title="自动部署" :width="110">
-                <template #cell="{ record }">{{ record.autoDeploy ? '开启' : '关闭' }}</template>
-              </a-table-column>
-              <a-table-column title="状态" :width="100">
-                <template #cell="{ record }">
-                  <a-tooltip v-if="strategyFailed(record)" :content="lastApplyStatus(record)?.error || '应用失败'">
-                    <a-tag color="red">应用失败</a-tag>
-                  </a-tooltip>
-                  <a-tag v-else :color="isStale(record) ? 'orange' : 'green'">{{ isStale(record) ? '待应用' : '已应用' }}</a-tag>
-                </template>
-              </a-table-column>
-              <a-table-column title="下次自动重试" :width="190">
-                <template #cell="{ record }">{{ record.autoDeploy && strategyFailed(record) && lastApplyStatus(record)?.nextRetryAt ? formatDate(lastApplyStatus(record).nextRetryAt) : '-' }}</template>
-              </a-table-column>
-              <a-table-column title="操作" :width="230">
-                <template #cell="{ record, rowIndex }">
-                  <div class="table-actions">
-                    <a-button size="mini" @click="openStrategy(record, rowIndex)">编辑</a-button>
-                    <a-button size="mini" status="danger" @click="removeStrategy(rowIndex)">删除</a-button>
-                    <a-button size="mini" type="primary" :disabled="!isStale(record)" @click="openApply(record)">应用</a-button>
-                  </div>
-                </template>
-              </a-table-column>
-            </template>
-          </a-table>
-        </a-tab-pane>
-      </a-tabs>
-    </div>
+          <div class="field-block">
+            <label>继承配置</label>
+            <a-select
+              v-model="inheritValue"
+              allow-clear
+              allow-search
+              size="large"
+              placeholder="搜索配置名称或版本"
+              @change="loadInheritedPreview"
+            >
+              <a-option v-for="option in inheritOptions" :key="option.value" :value="option.value" :label="option.label" />
+            </a-select>
+            <p>继承项是最底层数据，当前配置中的同名项会覆盖它。</p>
+          </div>
+        </section>
 
-    <a-drawer :visible="formVisible" :width="1100" unmount-on-close @cancel="formVisible = false" @ok="saveConfig">
-      <template #title>{{ form.metadata.name ? '编辑配置' : '新建配置' }}</template>
-      <a-form :model="form" auto-label-width>
-        <a-form-item label="名称" required><a-input v-model="form.spec.name" style="width: 420px" /></a-form-item>
-        <a-form-item label="版本池"><a-input-tag v-model="formVersions" style="width: 520px" placeholder="输入版本后回车" /></a-form-item>
-        <a-form-item label="继承配置">
-          <a-select v-model="inheritValue" allow-clear allow-search style="width: 520px" placeholder="搜索并选择已有配置 + version">
-            <a-option v-for="option in inheritOptions" :key="option.value" :value="option.value" :label="option.label" />
-          </a-select>
-        </a-form-item>
-        <a-form-item label="批量导入配置项">
-          <div class="full">
-            <a-space>
-              <a-select v-model="quickVersion" allow-clear allow-search style="width: 180px" placeholder="目标版本">
-                <a-option v-for="v in formVersions" :key="v" :value="v" />
-              </a-select>
-              <a-button type="primary" @click="importQuick">解析并添加</a-button>
-            </a-space>
-            <a-textarea v-model="quickText" style="margin-top: 8px" :auto-size="{ minRows: 4, maxRows: 8 }" placeholder="每行一个 name=value" />
-            <div class="muted" style="margin-top: 6px">每行一个 name=value，解析后添加到下方配置项；文本内容不会单独保存。</div>
+        <section class="version-board">
+          <div class="section-heading compact-heading">
+            <div>
+              <span class="section-kicker">VERSION POOL</span>
+              <h2>版本池</h2>
+            </div>
+            <span class="section-note">配置项留空版本时，将作为所有环境共享的公共配置</span>
           </div>
-        </a-form-item>
-        <a-form-item label="配置项" required>
-          <div class="full">
-            <div class="row-tools"><a-button @click="addItem"><template #icon><icon-plus /></template>添加配置项</a-button></div>
-            <a-table :data="form.spec.items" :pagination="false" row-key="name">
+          <a-input-tag
+            v-model="formVersions"
+            allow-clear
+            size="large"
+            placeholder="输入版本名并回车，例如 dev、staging、prod"
+            @change="guardVersionPool"
+          />
+        </section>
+
+        <section class="workbench">
+          <div class="workbench-head">
+            <div>
+              <span class="section-kicker">CONFIGURATION ITEMS</span>
+              <h2>配置工作表</h2>
+              <p>{{ form.spec.items.length }} 条当前配置<span v-if="inheritedItems.length">，{{ inheritedItems.length }} 条继承配置</span></p>
+            </div>
+            <div class="workbench-actions">
+              <a-button @click="openImport"><template #icon><icon-import /></template>从文本导入</a-button>
+              <a-button type="primary" @click="addItem"><template #icon><icon-plus /></template>添加配置项</a-button>
+            </div>
+          </div>
+
+          <div class="editor-version-strip">
+            <span>查看版本</span>
+            <div class="version-tabs">
+              <button :class="{ active: editorVersionFilter === null }" type="button" @click="editorVersionFilter = null">全部</button>
+              <button :class="{ active: editorVersionFilter === '' }" type="button" @click="editorVersionFilter = ''">公共配置</button>
+              <button v-for="version in formVersions" :key="version" :class="{ active: editorVersionFilter === version }" type="button" @click="editorVersionFilter = version">{{ version }}</button>
+            </div>
+          </div>
+
+          <div class="sheet-wrap">
+            <a-table :data="editableItems" :pagination="false" row-key="_editKey" class="config-sheet" :scroll="{ x: 980 }">
               <template #columns>
-                <a-table-column title="version" :width="160">
-                  <template #cell="{ record }"><a-select v-model="record.version" allow-clear allow-create allow-search placeholder="公共"><a-option v-for="v in formVersions" :key="v" :value="v" /></a-select></template>
+                <a-table-column title="版本" :width="170">
+                  <template #cell="{ record }">
+                    <a-select
+                      v-model="record.version"
+                      allow-clear
+                      allow-create
+                      allow-search
+                      placeholder="公共配置"
+                      @change="addVersion(record.version)"
+                    >
+                      <a-option v-for="version in formVersions" :key="version" :value="version" />
+                    </a-select>
+                  </template>
                 </a-table-column>
-                <a-table-column title="name" :width="220">
-                  <template #cell="{ record }"><a-input v-model="record.name" /></template>
+                <a-table-column title="配置名" :width="230">
+                  <template #cell="{ record }"><a-input v-model="record.name" class="mono-input" placeholder="MYSQL_HOST" /></template>
                 </a-table-column>
-                <a-table-column title="value">
-                  <template #cell="{ record }"><a-textarea v-model="record.value" :auto-size="{ minRows: 1, maxRows: 4 }" /></template>
+                <a-table-column title="值" :width="310">
+                  <template #cell="{ record }"><a-textarea v-model="record.value" class="mono-input" :auto-size="{ minRows: 1, maxRows: 5 }" placeholder="允许为空" /></template>
                 </a-table-column>
-                <a-table-column title="remark" :width="220">
-                  <template #cell="{ record }"><a-input v-model="record.remark" /></template>
+                <a-table-column title="备注" :width="230">
+                  <template #cell="{ record }"><a-input v-model="record.remark" placeholder="说明用途或来源" /></template>
                 </a-table-column>
-                <a-table-column title="操作" :width="90">
-                  <template #cell="{ rowIndex }"><a-button size="mini" status="danger" @click="form.spec.items.splice(rowIndex, 1)">删除</a-button></template>
+                <a-table-column title="" :width="70" fixed="right">
+                  <template #cell="{ record }"><a-button type="text" status="danger" @click="removeItem(record)"><icon-delete /></a-button></template>
                 </a-table-column>
               </template>
             </a-table>
+            <div v-if="!editableItems.length" class="sheet-empty">
+              <icon-code-square class="empty-icon" />
+              <strong>{{ form.spec.items.length ? '当前版本没有配置项' : '还没有当前配置项' }}</strong>
+              <span>添加一行，或从现有环境变量文本批量导入。</span>
+            </div>
+
+            <div v-if="inheritValue" class="inherit-divider">
+              <span>继承配置 · 只读底层</span>
+              <a-spin v-if="inheritLoading" :size="16" />
+            </div>
+            <a-table v-if="inheritedItems.length" :data="inheritedItems" :pagination="false" row-key="_rowKey" class="inherited-sheet" :scroll="{ x: 980 }">
+              <template #columns>
+                <a-table-column title="版本" :width="170"><template #cell="{ record }"><span class="version-code">{{ record.version || '公共' }}</span></template></a-table-column>
+                <a-table-column title="配置名" :width="230"><template #cell="{ record }"><code>{{ record.name }}</code></template></a-table-column>
+                <a-table-column title="继承值" :width="310"><template #cell="{ record }"><code class="value-code">{{ record.value }}</code></template></a-table-column>
+                <a-table-column title="来源" :width="230"><template #cell="{ record }"><span class="source-label">{{ record.sourceTitle || inheritedTitle }}</span></template></a-table-column>
+                <a-table-column title="" :width="120" fixed="right"><template #cell="{ record }"><a-button size="small" @click="overrideInherited(record)">覆盖此项</a-button></template></a-table-column>
+              </template>
+            </a-table>
+            <div v-else-if="inheritValue && !inheritLoading" class="sheet-empty inherited-empty">所选继承版本没有配置项</div>
           </div>
-        </a-form-item>
-      </a-form>
-    </a-drawer>
+        </section>
+      </div>
+    </section>
 
-    <a-modal v-model:visible="strategyVisible" :title="strategyIndex > -1 ? '编辑部署策略' : '新增部署策略'" width="820px" @ok="saveStrategy">
-      <a-form :model="strategyForm" auto-label-width>
-        <a-form-item label="策略类型"><a-radio-group v-model="strategyForm.type"><a-radio value="env">环境变量类型</a-radio><a-radio value="file">配置文件类型</a-radio></a-radio-group></a-form-item>
-        <a-form-item label="部署 namespace">
-          <a-space><a-input v-model="targetNamespace" style="width: 320px" @press-enter="reloadTargets" /><a-button @click="reloadTargets"><template #icon><icon-refresh /></template></a-button></a-space>
-        </a-form-item>
-        <a-form-item label="部署目标">
-          <a-select v-model="targetValue" allow-search placeholder="选择应用容器" style="width: 620px">
-            <a-option v-for="target in targetOptions" :key="target.value" :value="target.value" :label="target.label" />
+    <template v-else-if="!current">
+      <header class="page-hero">
+        <div>
+          <div class="eyebrow">SHARED CONFIGURATION CONTROL</div>
+          <h1>配置中心</h1>
+          <p>把共享服务、环境差异和部署目标放在一条可追踪的配置流上。</p>
+        </div>
+        <div class="hero-actions">
+          <a-button size="large" :loading="loading" @click="refresh"><template #icon><icon-refresh /></template>刷新</a-button>
+          <a-button type="primary" size="large" @click="openCreate"><template #icon><icon-plus /></template>新建配置</a-button>
+        </div>
+      </header>
+
+      <section class="ledger-panel">
+        <div class="ledger-tools">
+          <a-input v-model="searchText" allow-clear placeholder="搜索配置名称" class="search-box">
+            <template #prefix><icon-search /></template>
+          </a-input>
+          <a-select v-model="updateFilter" class="filter-select">
+            <a-option value="all">全部更新时间</a-option>
+            <a-option value="recent">24 小时内更新</a-option>
           </a-select>
-        </a-form-item>
-        <a-form-item v-if="strategyForm.type === 'file'" label="挂载路径"><a-input v-model="strategyForm.mountPath" style="width: 420px" placeholder="/app/config" /></a-form-item>
+          <a-select v-model="deployFilter" class="filter-select">
+            <a-option value="all">全部部署状态</a-option>
+            <a-option value="pending">有待应用策略</a-option>
+            <a-option value="failed">有失败策略</a-option>
+            <a-option value="ready">全部已应用</a-option>
+          </a-select>
+          <span class="result-count">{{ filteredRows.length }} / {{ rows.length }} 套配置</span>
+        </div>
+
+        <a-alert v-if="loadError" type="error" :show-icon="true">{{ loadError }}</a-alert>
+        <a-table v-else :data="filteredRows" :pagination="false" row-key="metadata.name" :loading="loading" class="ledger-table" :scroll="{ x: 1120 }">
+          <template #columns>
+            <a-table-column title="配置" :width="240" fixed="left">
+              <template #cell="{ record }">
+                <button class="config-name" type="button" @click="openDetail(record)">
+                  <span>{{ record.spec.name }}</span>
+                  <small>{{ record.metadata.name }}</small>
+                </button>
+              </template>
+            </a-table-column>
+            <a-table-column title="版本" :width="210">
+              <template #cell="{ record }">
+                <div class="tag-cluster">
+                  <span class="version-pill public-pill">公共</span>
+                  <span v-for="version in versionsOf([record]).slice(0, 3)" :key="version" class="version-pill">{{ version }}</span>
+                  <span v-if="versionsOf([record]).length > 3" class="more-pill">+{{ versionsOf([record]).length - 3 }}</span>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="继承来源" :width="220"><template #cell="{ record }"><span :class="['lineage-text', { empty: !record.spec.inherit?.configName }]">{{ inheritLabel(record) }}</span></template></a-table-column>
+            <a-table-column title="配置项" :width="100"><template #cell="{ record }"><strong class="data-number">{{ record.spec.items?.length || 0 }}</strong></template></a-table-column>
+            <a-table-column title="部署状态" :width="170">
+              <template #cell="{ record }"><span :class="['status-chip', deploySummary(record).tone]"><i></i>{{ deploySummary(record).label }}</span></template>
+            </a-table-column>
+            <a-table-column title="更新时间" :width="210">
+              <template #cell="{ record }">
+                <div :class="['update-time', { recent: record.recent }]">
+                  <icon-sync v-if="record.recent" />
+                  <span>{{ formatDate(record.status.updatedAt || record.metadata.creationTimestamp) }}</span>
+                </div>
+              </template>
+            </a-table-column>
+            <a-table-column title="" :width="150" fixed="right">
+              <template #cell="{ record }">
+                <div class="row-actions">
+                  <a-button size="small" @click="openEdit(record)">编辑</a-button>
+                  <a-popconfirm content="删除后无法恢复，确定继续？" @ok="remove(record)"><a-button size="small" type="text" status="danger">删除</a-button></a-popconfirm>
+                </div>
+              </template>
+            </a-table-column>
+          </template>
+        </a-table>
+        <div v-if="!loading && !loadError && !filteredRows.length" class="ledger-empty">
+          <div class="empty-orbit"><icon-branch /></div>
+          <h2>{{ rows.length ? '没有符合筛选条件的配置' : '创建第一条配置流' }}</h2>
+          <p>{{ rows.length ? '调整搜索或筛选条件后再试。' : '从一套共享数据库、Redis 或对象存储配置开始。' }}</p>
+          <a-button v-if="!rows.length" type="primary" @click="openCreate">新建配置</a-button>
+        </div>
+      </section>
+    </template>
+
+    <template v-else>
+      <header class="detail-header">
+        <button class="back-link" type="button" @click="current = null"><icon-left />返回配置列表</button>
+        <div class="detail-title-row">
+          <div>
+            <div class="eyebrow">CONFIGURATION FLOW</div>
+            <h1>{{ current.spec.name }}</h1>
+            <p>{{ current.metadata.name }}</p>
+          </div>
+          <a-button type="primary" size="large" @click="openEdit(current)"><template #icon><icon-edit /></template>编辑配置</a-button>
+        </div>
+
+        <div :class="['flow-rail', { flowing: detailPendingCount > 0 }]">
+          <div class="flow-node source-node">
+            <span class="node-icon"><icon-link /></span>
+            <div><small>继承来源</small><strong>{{ inheritLabel(current) }}</strong></div>
+          </div>
+          <span class="rail-segment"><i></i></span>
+          <div class="flow-node current-node">
+            <span class="node-icon"><icon-code-square /></span>
+            <div><small>当前配置</small><strong>{{ current.spec.items?.length || 0 }} 项 · {{ versionsOf([current]).length }} 个版本</strong></div>
+          </div>
+          <span class="rail-segment"><i></i></span>
+          <div class="flow-node target-node">
+            <span class="node-icon"><icon-apps /></span>
+            <div><small>部署目标</small><strong>{{ current.spec.strategies?.length || 0 }} 个策略 · {{ detailPendingCount }} 个待应用</strong></div>
+          </div>
+        </div>
+      </header>
+
+      <section class="detail-panel">
+        <div class="detail-tabs">
+          <button :class="{ active: activeTab === 'data' }" type="button" @click="activeTab = 'data'">配置数据</button>
+          <button :class="{ active: activeTab === 'deploy' }" type="button" @click="activeTab = 'deploy'">配置部署 <span>{{ current.spec.strategies?.length || 0 }}</span></button>
+        </div>
+
+        <div v-if="activeTab === 'data'" class="tab-workspace">
+          <div class="data-toolbar">
+            <div class="version-tabs">
+              <button :class="{ active: versionFilter === null }" type="button" @click="setVersion(null)">全部</button>
+              <button :class="{ active: versionFilter === '' }" type="button" @click="setVersion('')">公共配置</button>
+              <button v-for="version in versionsOf([current])" :key="version" :class="{ active: versionFilter === version }" type="button" @click="setVersion(version)">{{ version }}</button>
+            </div>
+            <span>{{ resolvedItems.length }} 条解析结果</span>
+          </div>
+          <a-table :data="resolvedItems" :pagination="false" row-key="_rowKey" class="data-table" :loading="resolvedLoading" :scroll="{ x: 880 }">
+            <template #columns>
+              <a-table-column title="版本" :width="140"><template #cell="{ record }"><span class="version-code">{{ record.version || '公共' }}</span></template></a-table-column>
+              <a-table-column title="配置名" :width="240"><template #cell="{ record }"><code>{{ record.name }}</code></template></a-table-column>
+              <a-table-column title="值"><template #cell="{ record }"><code class="value-code">{{ record.value }}</code></template></a-table-column>
+              <a-table-column title="备注" :width="220" data-index="remark" />
+              <a-table-column title="来源" :width="180"><template #cell="{ record }"><span :class="['source-badge', record.source === 'inherit' ? 'inherited' : 'owned']">{{ record.source === 'inherit' ? `继承 · ${record.sourceTitle}` : '当前配置' }}</span></template></a-table-column>
+            </template>
+          </a-table>
+          <div v-if="!resolvedLoading && !resolvedItems.length" class="inline-empty">当前筛选下没有配置项</div>
+        </div>
+
+        <div v-else class="tab-workspace">
+          <div class="deployment-head">
+            <div><h2>部署策略</h2><p>策略保存后不会立即生效，需要手动应用或开启自动部署。</p></div>
+            <a-button type="primary" @click="openStrategy()"><template #icon><icon-plus /></template>新增部署策略</a-button>
+          </div>
+          <div v-if="current.spec.strategies?.length" class="strategy-list">
+            <article v-for="(strategy, index) in current.spec.strategies" :key="strategy.id" class="strategy-row">
+              <div class="strategy-type"><span><icon-code v-if="strategy.type === 'env'" /><icon-file v-else /></span><div><strong>{{ strategy.type === 'file' ? '配置文件' : '环境变量' }}</strong><small>{{ strategy.type === 'file' ? strategy.mountPath : '作为容器环境变量注入' }}</small></div></div>
+              <div class="strategy-target"><small>部署到</small><strong>{{ strategy.target.group || strategy.target.namespace }} / {{ strategy.target.name }}</strong><code>{{ strategy.target.kind }} · {{ strategy.target.container }}</code></div>
+              <div class="strategy-version"><small>配置版本</small><strong>{{ strategy.lastSelectedVersion || '公共配置' }}</strong><span>{{ strategy.autoDeploy ? '自动部署已开启' : '手动应用' }}</span></div>
+              <div class="strategy-state">
+                <a-tooltip v-if="strategyFailed(strategy)" :content="lastApplyStatus(strategy)?.error || '应用失败'"><span class="status-chip failed"><i></i>应用失败</span></a-tooltip>
+                <span v-else :class="['status-chip', isStale(strategy) ? 'pending' : 'ready']"><i></i>{{ isStale(strategy) ? '待应用' : '已应用' }}</span>
+                <small v-if="strategy.autoDeploy && strategyFailed(strategy) && lastApplyStatus(strategy)?.nextRetryAt">{{ formatDate(lastApplyStatus(strategy).nextRetryAt) }} 重试</small>
+              </div>
+              <div class="strategy-actions">
+                <a-button size="small" @click="openStrategy(strategy, index)">编辑</a-button>
+                <a-popconfirm content="确定删除该部署策略？" @ok="removeStrategy(index)"><a-button size="small" type="text" status="danger">删除</a-button></a-popconfirm>
+                <a-button size="small" type="primary" :disabled="!isStale(strategy)" @click="openApply(strategy)">应用</a-button>
+              </div>
+            </article>
+          </div>
+          <div v-else class="ledger-empty compact-empty"><div class="empty-orbit"><icon-send /></div><h2>还没有部署策略</h2><p>选择应用容器，把当前配置作为环境变量或配置文件应用过去。</p><a-button type="primary" @click="openStrategy()">新增部署策略</a-button></div>
+        </div>
+      </section>
+    </template>
+
+    <a-modal v-model:visible="importVisible" title="从文本导入配置项" width="780px" :ok-button-props="{ disabled: !quickPreview.length }" @ok="confirmImport">
+      <div class="import-layout">
+        <div class="field-block">
+          <label>导入到版本</label>
+          <a-select v-model="quickVersion" allow-clear allow-create allow-search placeholder="公共配置（留空）">
+            <a-option v-for="version in formVersions" :key="version" :value="version" />
+          </a-select>
+          <p>可选择已有版本或直接输入新版本。</p>
+        </div>
+        <div class="field-block">
+          <label>配置文本</label>
+          <a-textarea v-model="quickText" class="import-textarea" :auto-size="{ minRows: 7, maxRows: 12 }" placeholder="MYSQL_HOST=mysql&#10;MYSQL_PORT=3306" />
+          <p>每行一个 name=value；文本只用于解析，不会单独保存。</p>
+        </div>
+        <div class="import-preview">
+          <div><strong>解析预览</strong><span>{{ quickPreview.length }} 条</span></div>
+          <a-table v-if="quickPreview.length" :data="quickPreview.slice(0, 6)" :pagination="false" size="small">
+            <template #columns><a-table-column title="版本"><template #cell="{ record }">{{ record.version || '公共' }}</template></a-table-column><a-table-column title="配置名" data-index="name" /><a-table-column title="值" data-index="value" /></template>
+          </a-table>
+          <span v-if="quickPreview.length > 6" class="preview-more">另有 {{ quickPreview.length - 6 }} 条将在确认后添加</span>
+        </div>
+      </div>
+    </a-modal>
+
+    <a-modal v-model:visible="strategyVisible" :title="strategyIndex > -1 ? '编辑部署策略' : '新增部署策略'" width="760px" @ok="saveStrategy">
+      <a-form :model="strategyForm" layout="vertical">
+        <a-form-item label="部署方式"><a-radio-group v-model="strategyForm.type" type="button"><a-radio value="env">环境变量</a-radio><a-radio value="file">配置文件</a-radio></a-radio-group></a-form-item>
+        <div class="modal-grid">
+          <a-form-item label="Namespace"><a-input v-model="targetNamespace" @press-enter="reloadTargets"><template #suffix><icon-refresh class="clickable" @click="reloadTargets" /></template></a-input></a-form-item>
+          <a-form-item label="工作负载与容器"><a-select v-model="targetValue" allow-search placeholder="选择已部署应用的容器"><a-option v-for="target in targetOptions" :key="target.value" :value="target.value" :label="target.label" /></a-select></a-form-item>
+        </div>
+        <a-form-item v-if="strategyForm.type === 'file'" label="容器内挂载路径"><a-input v-model="strategyForm.mountPath" class="mono-input" placeholder="/app/config" /></a-form-item>
       </a-form>
     </a-modal>
 
-    <a-modal v-model:visible="applyVisible" title="应用部署策略" width="680px" @ok="doApply">
-      <a-form :model="applyForm" auto-label-width>
-        <a-form-item label="部署应用">{{ applyTargetLabel }}</a-form-item>
-        <a-form-item label="配置版本"><a-select v-model="applyForm.version" allow-clear style="width: 320px" placeholder="留空表示公共配置"><a-option v-for="v in versionsOf([current])" :key="v" :value="v" /></a-select></a-form-item>
-        <a-form-item label="自动部署"><a-switch v-model="applyForm.autoDeploy" /></a-form-item>
+    <a-modal v-model:visible="applyVisible" title="应用部署策略" width="620px" :ok-loading="applying" @ok="doApply">
+      <div class="apply-target"><span><icon-send /></span><div><small>部署应用</small><strong>{{ applyTargetLabel }}</strong></div></div>
+      <a-form :model="applyForm" layout="vertical">
+        <a-form-item label="配置版本"><a-select v-model="applyForm.version" allow-clear placeholder="公共配置（留空）"><a-option v-for="version in versionsOf([current])" :key="version" :value="version" /></a-select></a-form-item>
+        <a-form-item><div class="switch-row"><div><strong>自动部署</strong><span>配置更新后自动执行该策略；失败时按退避时间重试。</span></div><a-switch v-model="applyForm.autoDeploy" /></div></a-form-item>
       </a-form>
     </a-modal>
-  </div>
+  </main>
 </template>
 
 <script setup>
 import { computed, onMounted, reactive, ref } from 'vue'
 import { Message } from '@arco-design/web-vue'
-import { formatDate, inheritOptionValue, isRecent, isStrategyStale, parseQuick, uid, versionsOf } from './utils'
+import { formatDate, inheritOptionValue, isRecent, isStrategyStale, normalizeVersions, parseQuick, uid, versionsOf } from './utils'
 import { applyStrategy, createConfig, deleteConfig, listConfigs, listTargets, resolveConfig, updateConfig } from './api'
 
 const targetNamespace = ref(window?.$wujie?.props?.namespace || 'default')
 const loading = ref(false)
+const saving = ref(false)
+const applying = ref(false)
+const loadError = ref('')
 const configs = ref([])
 const current = ref(null)
 const activeTab = ref('data')
 const versionFilter = ref(null)
 const resolvedItems = ref([])
-const formVisible = ref(false)
+const resolvedLoading = ref(false)
+const editing = ref(false)
+const editorReturn = ref('list')
 const formVersions = ref([])
 const inheritValue = ref('')
+const inheritedItems = ref([])
+const inheritedTitle = ref('')
+const inheritLoading = ref(false)
+const editorVersionFilter = ref(null)
+const importVisible = ref(false)
 const quickText = ref('')
 const quickVersion = ref('')
 const strategyVisible = ref(false)
@@ -230,13 +375,23 @@ const targets = ref([])
 const applyVisible = ref(false)
 const applyStrategyId = ref('')
 const applyTargetLabel = ref('')
-const applyForm = reactive({ version: '', autoDeploy: false })
+const searchText = ref('')
+const updateFilter = ref('all')
+const deployFilter = ref('all')
 
-const emptyForm = () => ({ apiVersion: 'cloudconfig.w7.cc/v1alpha1', kind: 'CloudConfig', metadata: { name: '' }, spec: { name: '', items: [], strategies: [] } })
+const emptyForm = () => ({ apiVersion: 'cloudconfig.w7.cc/v1alpha1', kind: 'CloudConfig', metadata: { name: '' }, spec: { name: '', versions: [], items: [], strategies: [] } })
 const form = reactive(emptyForm())
 const strategyForm = reactive({ id: '', type: 'env', target: { namespace: targetNamespace.value, kind: '', name: '', container: '', group: '' }, mountPath: '', autoDeploy: false, lastSelectedVersion: '' })
+const applyForm = reactive({ version: '', autoDeploy: false })
 
-const rows = computed(() => configs.value.map((item) => ({ ...item, recent: isRecent(item.status), versionCount: versionsOf([item]).length })))
+const rows = computed(() => configs.value.map((item) => ({ ...item, recent: isRecent(item.status) })))
+const filteredRows = computed(() => rows.value.filter((record) => {
+  const query = searchText.value.trim().toLowerCase()
+  if (query && !`${record.spec.name} ${record.metadata.name}`.toLowerCase().includes(query)) return false
+  if (updateFilter.value === 'recent' && !record.recent) return false
+  if (deployFilter.value !== 'all' && deploySummary(record).state !== deployFilter.value) return false
+  return true
+}))
 const inheritOptions = computed(() => {
   const options = []
   configs.value.forEach((cfg) => {
@@ -246,54 +401,178 @@ const inheritOptions = computed(() => {
   })
   return options
 })
-const targetOptions = computed(() => {
-  const options = []
-  targets.value.forEach((target) => {
-    ;(target.containers || []).forEach((container) => {
-      const value = JSON.stringify({ namespace: target.namespace, kind: target.kind, name: target.name, container, group: target.group || '' })
-      options.push({ value, label: `${target.namespace} / ${target.kind} / ${target.name} / ${container}` })
-    })
-  })
-  return options
-})
+const targetOptions = computed(() => targets.value.flatMap((target) => (target.containers || []).map((container) => {
+  const value = JSON.stringify({ namespace: target.namespace, kind: target.kind, name: target.name, container, group: target.group || '' })
+  return { value, label: `${target.group || target.namespace} / ${target.kind} / ${target.name} / ${container}` }
+})))
+const quickPreview = computed(() => parseQuick(quickText.value, quickVersion.value))
+const detailPendingCount = computed(() => (current.value?.spec?.strategies || []).filter((strategy) => isStrategyStale(current.value, strategy.id, strategy)).length)
+const editableItems = computed(() => editorVersionFilter.value === null
+  ? form.spec.items
+  : form.spec.items.filter((item) => (item.version || '') === editorVersionFilter.value))
 
 async function refresh() {
   loading.value = true
+  loadError.value = ''
   try {
     configs.value = await listConfigs()
     if (current.value) {
       current.value = configs.value.find((item) => item.metadata.name === current.value.metadata.name) || current.value
       await loadResolved()
     }
+  } catch (error) {
+    loadError.value = error.response?.data?.message || error.message || '配置列表加载失败'
   } finally {
     loading.value = false
   }
 }
 
 function inheritLabel(record) {
-  const inherit = record.spec?.inherit
-  if (!inherit?.configName) return '-'
+  const inherit = record?.spec?.inherit
+  if (!inherit?.configName) return '未继承'
   const parent = configs.value.find((item) => item.metadata.name === inherit.configName)
   return `${parent?.spec?.name || inherit.configName} / ${inherit.version || '公共配置'}`
+}
+
+function deploySummary(record) {
+  const strategies = record.spec?.strategies || []
+  if (!strategies.length) return { state: 'none', tone: 'neutral', label: '未配置部署' }
+  const failed = strategies.filter((strategy) => {
+    const status = (record.status?.lastApplied || []).find((item) => item.strategyId === strategy.id)
+    return status && !status.success && isStrategyStale(record, strategy.id, strategy)
+  }).length
+  if (failed) return { state: 'failed', tone: 'failed', label: `${failed} 个应用失败` }
+  const pending = strategies.filter((strategy) => isStrategyStale(record, strategy.id, strategy)).length
+  if (pending) return { state: 'pending', tone: 'pending', label: `${pending} 个待应用` }
+  return { state: 'ready', tone: 'ready', label: '全部已应用' }
 }
 
 function assignForm(data) {
   Object.assign(form, emptyForm(), JSON.parse(JSON.stringify(data || emptyForm())))
   delete form.metadata.namespace
-  form.spec.items = form.spec.items || []
+  form.spec.items = (form.spec.items || []).map((item) => ({ ...item, _editKey: uid('item') }))
   form.spec.strategies = form.spec.strategies || []
   formVersions.value = versionsOf([form])
+  form.spec.versions = [...formVersions.value]
   inheritValue.value = form.spec.inherit?.configName ? inheritOptionValue(form.spec.inherit) : ''
+  inheritedItems.value = []
+  editorVersionFilter.value = null
 }
 
 function openCreate() {
+  editorReturn.value = current.value ? 'detail' : 'list'
   assignForm(emptyForm())
-  formVisible.value = true
+  editing.value = true
 }
 
 function openEdit(record) {
+  editorReturn.value = current.value ? 'detail' : 'list'
   assignForm(record)
-  formVisible.value = true
+  editing.value = true
+  loadInheritedPreview()
+}
+
+function closeEditor() {
+  editing.value = false
+  inheritedItems.value = []
+}
+
+async function loadInheritedPreview() {
+  inheritedItems.value = []
+  if (!inheritValue.value) return
+  const inherit = JSON.parse(inheritValue.value)
+  const parent = configs.value.find((item) => item.metadata.name === inherit.configName)
+  inheritedTitle.value = `${parent?.spec?.name || inherit.configName} / ${inherit.version || '公共配置'}`
+  inheritLoading.value = true
+  try {
+    const result = await resolveConfig(inherit.configName, inherit.version || '')
+    inheritedItems.value = (result.items || []).map((item, index) => ({ ...item, _rowKey: `inherit:${item.name}:${index}` }))
+  } catch {
+    inheritedItems.value = []
+  } finally {
+    inheritLoading.value = false
+  }
+}
+
+function guardVersionPool(values) {
+  const normalized = normalizeVersions(values)
+  const used = new Set((form.spec.items || []).map((item) => item.version).filter(Boolean))
+  ;(form.spec.strategies || []).forEach((strategy) => strategy.lastSelectedVersion && used.add(strategy.lastSelectedVersion))
+  const removedUsed = [...used].filter((version) => !normalized.includes(version))
+  if (removedUsed.length) {
+    formVersions.value = normalizeVersions([...normalized, ...removedUsed])
+    Message.warning(`版本 ${removedUsed.join('、')} 正在使用，需先调整配置项或部署策略`)
+    return
+  }
+  formVersions.value = normalized
+}
+
+function addVersion(version) {
+  const normalized = String(version || '').trim()
+  if (normalized && !formVersions.value.includes(normalized)) formVersions.value.push(normalized)
+}
+
+function addItem(item = {}) {
+  form.spec.items.push({ version: editorVersionFilter.value || '', name: '', value: '', remark: '', ...item, _editKey: uid('item') })
+}
+
+function removeItem(record) {
+  const index = form.spec.items.findIndex((item) => item._editKey === record._editKey)
+  if (index > -1) form.spec.items.splice(index, 1)
+}
+
+function overrideInherited(record) {
+  const targetVersion = editorVersionFilter.value || ''
+  const existing = form.spec.items.find((item) => item.name === record.name && (item.version || '') === targetVersion)
+  if (existing) {
+    Message.info(`当前配置中已存在该${targetVersion || '公共'}配置项`)
+    return
+  }
+  addItem({ version: targetVersion, name: record.name, value: record.value, remark: record.remark || '' })
+  Message.success(`已添加 ${record.name} 的覆盖项`)
+}
+
+function openImport() {
+  quickText.value = ''
+  quickVersion.value = ''
+  importVisible.value = true
+}
+
+function confirmImport() {
+  addVersion(quickVersion.value)
+  quickPreview.value.forEach((item) => addItem(item))
+  Message.success(`已添加 ${quickPreview.value.length} 条配置项`)
+  importVisible.value = false
+  quickText.value = ''
+}
+
+async function saveConfig() {
+  if (!form.spec.name.trim()) return Message.warning('请输入配置名称')
+  const emptyIndex = form.spec.items.findIndex((item) => !item.name.trim())
+  if (emptyIndex > -1) return Message.warning(`第 ${emptyIndex + 1} 条配置项缺少配置名`)
+  saving.value = true
+  try {
+    form.spec.inherit = inheritValue.value ? JSON.parse(inheritValue.value) : null
+    form.spec.versions = normalizeVersions(formVersions.value)
+    const payload = JSON.parse(JSON.stringify(form))
+    payload.spec.items = payload.spec.items.map(({ _editKey, ...item }) => item)
+    const saved = form.metadata.name ? await updateConfig(form.metadata.name, payload) : await createConfig(payload)
+    editing.value = false
+    Message.success('配置已保存')
+    await refresh()
+    if (editorReturn.value === 'detail') {
+      current.value = configs.value.find((item) => item.metadata.name === saved.metadata.name) || saved
+      await loadResolved()
+    }
+  } finally {
+    saving.value = false
+  }
+}
+
+async function remove(record) {
+  await deleteConfig(record.metadata.name)
+  Message.success('配置已删除')
+  await refresh()
 }
 
 async function openDetail(record) {
@@ -310,49 +589,17 @@ async function setVersion(version) {
 
 async function loadResolved() {
   if (!current.value) return
-  const result = await resolveConfig(current.value.metadata.name, versionFilter.value)
-  resolvedItems.value = (result.items || []).map((item, index) => ({ ...item, _rowKey: resolvedRowKey(item, index) }))
-}
-
-function addItem() {
-  form.spec.items.push({ version: '', name: '', value: '', remark: '' })
-}
-
-function importQuick() {
-  form.spec.items.push(...parseQuick(quickText.value, quickVersion.value))
-  quickText.value = ''
-}
-
-async function saveConfig() {
-  if (!form.spec.name) {
-    Message.warning('请输入名称')
-    return
+  resolvedLoading.value = true
+  try {
+    const result = await resolveConfig(current.value.metadata.name, versionFilter.value)
+    resolvedItems.value = (result.items || []).map((item, index) => ({ ...item, _rowKey: `${item.source || 'self'}:${item.sourceName || ''}:${item.version || ''}:${item.name}:${index}` }))
+  } finally {
+    resolvedLoading.value = false
   }
-  form.spec.inherit = inheritValue.value ? JSON.parse(inheritValue.value) : null
-  if (form.metadata.name) {
-    await updateConfig(form.metadata.name, form)
-  } else {
-    await createConfig(form)
-  }
-  formVisible.value = false
-  Message.success('保存成功')
-  await refresh()
 }
 
-async function remove(record) {
-  await deleteConfig(record.metadata.name)
-  Message.success('删除成功')
-  await refresh()
-}
-
-async function ensureTargets() {
-  targets.value = await listTargets(targetNamespace.value)
-}
-
-async function reloadTargets() {
-  targetValue.value = ''
-  await ensureTargets()
-}
+async function ensureTargets() { targets.value = await listTargets(targetNamespace.value) }
+async function reloadTargets() { targetValue.value = ''; await ensureTargets() }
 
 async function openStrategy(record = null, index = -1) {
   if (record?.target?.namespace) targetNamespace.value = record.target.namespace
@@ -364,15 +611,9 @@ async function openStrategy(record = null, index = -1) {
 }
 
 async function saveStrategy() {
-  if (!targetValue.value) {
-    Message.warning('请选择部署目标')
-    return
-  }
+  if (!targetValue.value) return Message.warning('请选择部署目标')
   Object.assign(strategyForm.target, JSON.parse(targetValue.value))
-  if (strategyForm.type === 'file' && !strategyForm.mountPath) {
-    Message.warning('请输入挂载路径')
-    return
-  }
+  if (strategyForm.type === 'file' && !strategyForm.mountPath.trim()) return Message.warning('请输入挂载路径')
   const strategies = current.value.spec.strategies || []
   const payload = JSON.parse(JSON.stringify(strategyForm))
   if (strategyIndex.value > -1) strategies.splice(strategyIndex.value, 1, payload)
@@ -380,33 +621,20 @@ async function saveStrategy() {
   current.value.spec.strategies = strategies
   await updateConfig(current.value.metadata.name, current.value)
   strategyVisible.value = false
-  Message.success('策略已保存')
+  Message.success('部署策略已保存')
   await refresh()
 }
 
 async function removeStrategy(index) {
   current.value.spec.strategies.splice(index, 1)
   await updateConfig(current.value.metadata.name, current.value)
-  Message.success('策略已删除')
+  Message.success('部署策略已删除')
   await refresh()
 }
 
-function isStale(strategy) {
-  return isStrategyStale(current.value, strategy.id, strategy)
-}
-
-function lastApplyStatus(strategy) {
-  return (current.value?.status?.lastApplied || []).find((item) => item.strategyId === strategy.id) || null
-}
-
-function strategyFailed(strategy) {
-  const status = lastApplyStatus(strategy)
-  return !!status && !status.success && isStale(strategy)
-}
-
-function resolvedRowKey(record, index) {
-  return `${record.source || 'self'}:${record.sourceName || ''}:${record.version || ''}:${record.name}:${index}`
-}
+function isStale(strategy) { return isStrategyStale(current.value, strategy.id, strategy) }
+function lastApplyStatus(strategy) { return (current.value?.status?.lastApplied || []).find((item) => item.strategyId === strategy.id) || null }
+function strategyFailed(strategy) { const status = lastApplyStatus(strategy); return !!status && !status.success && isStale(strategy) }
 
 function openApply(strategy) {
   applyStrategyId.value = strategy.id
@@ -417,15 +645,17 @@ function openApply(strategy) {
 }
 
 async function doApply() {
+  applying.value = true
   try {
     await applyStrategy(current.value.metadata.name, applyStrategyId.value, applyForm)
+    Message.success('配置已应用并触发工作负载重启')
+    applyVisible.value = false
+    await refresh()
   } catch {
     await refresh()
-    return
+  } finally {
+    applying.value = false
   }
-  Message.success('应用成功')
-  applyVisible.value = false
-  await refresh()
 }
 
 onMounted(refresh)

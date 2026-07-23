@@ -10,6 +10,7 @@
 
 - 使用 Cluster-scoped `CloudConfig` CRD 管理全局共享配置，不携带 namespace。
 - 支持公共配置和多 version 配置，固定按“继承 < 当前公共 < 当前选中 version”覆盖。
+- `spec.versions` 持久保存可选版本池；旧对象仍会从配置项中的 version 自动补齐展示。
 - 配置可继承另一个全局配置的指定 version，当前配置同名项覆盖继承项。
 - 配置更新后标记 24 小时内更新状态，并传播到继承者。
 - 部署策略支持 Deployment、StatefulSet、DaemonSet 的指定容器。
@@ -22,6 +23,12 @@
 ## CRD 作用域变更
 
 `CloudConfig` 已从 Namespaced 改为 Cluster scope。Helm 不会在 upgrade 时自动更新 `crds/` 下已经安装的 CRD；开发期旧数据不迁移，升级前需要删除旧 CloudConfig 资源和旧 CRD，再重新安装 Chart。
+
+已有 Cluster-scoped CRD 升级到包含 `spec.versions` 的版本时，也需要在 Helm upgrade 前手动更新 CRD：
+
+```bash
+kubectl apply -f charts/w7panel-cloudconfig/crds/cloudconfig.w7.cc_cloudconfigs.yaml
+```
 
 ## 开发验证
 

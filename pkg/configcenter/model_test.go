@@ -1,6 +1,7 @@
 package configcenter
 
 import (
+	"reflect"
 	"testing"
 	"time"
 
@@ -21,6 +22,39 @@ func TestResolveItemsVersionOverridesPublicRegardlessOfOrder(t *testing.T) {
 		if got := ItemsToData(resolved)["MYSQL_HOST"]; got != "prod" {
 			t.Fatalf("expected selected version to override public item, got %q for %#v", got, items)
 		}
+	}
+}
+
+func TestNormalizeConfigVersions(t *testing.T) {
+	cfg := &cloudv1.CloudConfig{Spec: cloudv1.CloudConfigSpec{
+		Name:     "app",
+		Versions: []string{" prod ", "", "dev", "prod", " dev "},
+	}}
+
+	NormalizeConfig(cfg)
+
+	if got, want := cfg.Spec.Versions, []string{"prod", "dev"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("versions = %#v, want %#v", got, want)
+	}
+}
+
+func TestRevisionIncludesVersionPool(t *testing.T) {
+	cfg := &cloudv1.CloudConfig{Spec: cloudv1.CloudConfigSpec{Name: "app"}}
+	before := Revision(cfg)
+	cfg.Spec.Versions = []string{"prod"}
+	if after := Revision(cfg); after == before {
+		t.Fatal("expected version pool change to update revision")
+	}
+}
+
+func TestAvailableVersionsUsesPoolAndLegacyItems(t *testing.T) {
+	cfg := &cloudv1.CloudConfig{Spec: cloudv1.CloudConfigSpec{
+		Versions: []string{"prod", "dev"},
+		Items:    []cloudv1.ConfigItem{{Version: "legacy", Name: "KEY"}},
+		Inherit:  &cloudv1.ConfigInherit{ConfigName: "base", Version: "parent-only"},
+	}}
+	if got, want := AvailableVersions(cfg), []string{"dev", "legacy", "prod"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("versions = %#v, want %#v", got, want)
 	}
 }
 

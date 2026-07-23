@@ -31,6 +31,10 @@ spec:
               properties:
                 name:
                   type: string
+                versions:
+                  type: array
+                  items:
+                    type: string
                 inherit:
                   type: object
                   properties:
